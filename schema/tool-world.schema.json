@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/tool-world.schema.json",
+  "title": "Gauntlet Tool World",
+  "description": "Schema for tool world definition YAML files that describe simulated external tool behavior.",
+  "type": "object",
+  "required": ["tool"],
+  "additionalProperties": false,
+  "properties": {
+    "tool": {
+      "type": "string",
+      "description": "Unique identifier for this tool."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the tool and its purpose."
+    },
+    "states": {
+      "type": "object",
+      "description": "Named states the tool can be in, each defining different response behavior.",
+      "additionalProperties": false,
+      "properties": {
+        "nominal": {
+          "$ref": "#/definitions/tool_state",
+          "description": "Normal, healthy operating state."
+        },
+        "timeout": {
+          "$ref": "#/definitions/tool_state",
+          "description": "State where the tool times out."
+        },
+        "server_error": {
+          "$ref": "#/definitions/tool_state",
+          "description": "State where the tool returns a server error (5xx)."
+        },
+        "malformed_response": {
+          "$ref": "#/definitions/tool_state",
+          "description": "State where the tool returns a malformed or unparseable response."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "tool_state": {
+      "type": "object",
+      "description": "A single tool state defining either a successful response or an error.",
+      "properties": {
+        "response": {
+          "description": "The response body returned by the tool in this state. Can be any valid JSON type.",
+          "type": ["object", "array", "string", "number", "boolean", "null"]
+        },
+        "error": {
+          "type": "object",
+          "description": "Error details when the tool is in a failure state.",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "description": "HTTP-style status code for the error."
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable error message."
+            }
+          }
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Simulated latency in milliseconds before the response is returned."
+        }
+      }
+    }
+  }
+}

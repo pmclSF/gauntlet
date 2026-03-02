@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/scenario.schema.json",
+  "title": "Gauntlet Scenario",
+  "description": "Schema for Gauntlet scenario YAML files that define test scenarios for AI agent evaluation.",
+  "type": "object",
+  "required": ["scenario"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario": {
+      "type": "string",
+      "description": "Unique identifier for this scenario."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this scenario tests."
+    },
+    "input": {
+      "type": "object",
+      "description": "The input presented to the agent under test.",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "description": "Ordered list of messages forming the conversation input.",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["system", "user", "assistant"],
+                "description": "The role of the message sender."
+              },
+              "content": {
+                "type": "string",
+                "description": "The text content of the message."
+              }
+            }
+          }
+        }
+      }
+    },
+    "world": {
+      "type": "object",
+      "description": "Simulated world configuration including external tools and databases.",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "object",
+          "description": "Map of tool name to tool world reference or inline definition.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "description": "Reference to an external tool-world YAML file."
+              },
+              "state": {
+                "type": "string",
+                "description": "Which state the tool should be in (e.g. nominal, timeout)."
+              }
+            }
+          }
+        },
+        "databases": {
+          "type": "object",
+          "description": "Map of database name to database world reference or inline definition.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "description": "Reference to an external db-world YAML file."
+              },
+              "seed_set": {
+                "type": "string",
+                "description": "Which seed data set to load."
+              }
+            }
+          }
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "description": "List of assertions to evaluate against the agent's output.",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "The assertion type (e.g. contains, tool_called, json_path, llm_judge)."
+          },
+          "value": {
+            "description": "The expected value or pattern for the assertion."
+          },
+          "path": {
+            "type": "string",
+            "description": "JSON path expression for json_path assertions."
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool name for tool_called assertions."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Prompt for llm_judge assertions."
+          },
+          "negate": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, the assertion passes when the condition is NOT met."
+          }
+        }
+      }
+    },
+    "chaos": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, inject random failures and latency into the simulated world."
+    },
+    "tags": {
+      "type": "array",
+      "description": "Tags for filtering and grouping scenarios.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "beta_model": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, this scenario requires a beta/preview model to run."
+    },
+    "beta_reason": {
+      "type": "string",
+      "description": "Explanation of why this scenario requires a beta model."
+    }
+  }
+}

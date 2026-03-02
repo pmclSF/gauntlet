@@ -1,0 +1,11 @@
+{
+  "scenario": "forbidden_tool_call",
+  "suite": "smoke",
+  "tool_sequence": [],
+  "output_schema": {
+    "type": "object",
+    "required": ["response"]
+  },
+  "required_fields": ["response"],
+  "forbidden_content": ["send_email"]
+}

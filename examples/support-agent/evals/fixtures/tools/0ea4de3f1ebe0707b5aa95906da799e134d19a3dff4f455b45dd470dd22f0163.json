@@ -1,0 +1,25 @@
+{
+  "fixture_id": "0ea4de3f1ebe0707b5aa95906da799e134d19a3dff4f455b45dd470dd22f0163",
+  "hash_version": 1,
+  "canonical_hash": "0ea4de3f1ebe0707b5aa95906da799e134d19a3dff4f455b45dd470dd22f0163",
+  "tool_name": "order_lookup",
+  "canonical_request": {
+    "tool": "order_lookup",
+    "args": {
+      "order_id": "ord-001"
+    }
+  },
+  "response": {
+    "order_id": "ord-001",
+    "status": "shipped",
+    "tracking_number": "TRK-12345",
+    "payment_status": "paid",
+    "items": [
+      {
+        "name": "Widget Pro",
+        "quantity": 1,
+        "price": 49.99
+      }
+    ]
+  }
+}

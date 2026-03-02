@@ -1,0 +1,18 @@
+{
+  "fixture_id": "60373a42392fb2f305d91f57f5d435165b03534f625f56db8e33c83f755f682f",
+  "hash_version": 1,
+  "canonical_hash": "60373a42392fb2f305d91f57f5d435165b03534f625f56db8e33c83f755f682f",
+  "tool_name": "send_email",
+  "canonical_request": {
+    "tool": "send_email",
+    "args": {
+      "body": "Thank you for contacting support.",
+      "subject": "Support Response",
+      "to": "customer@example.com"
+    }
+  },
+  "response": {
+    "status": "sent",
+    "message_id": "msg-001"
+  }
+}

@@ -1,0 +1,60 @@
+name: order_lookup_pairs
+tool: order_lookup
+pairs:
+  - id: good_standard_order
+    description: "Standard order lookup returns complete order details"
+    category: good
+    tags: [happy-path, smoke]
+    input:
+      order_id: "ord-001"
+    output:
+      order_id: "ord-001"
+      status: "shipped"
+      tracking_number: "TRK-12345"
+      payment_status: "paid"
+      items:
+        - name: "Widget Pro"
+          quantity: 1
+          price: 49.99
+
+  - id: good_processing_order
+    description: "Order still being processed"
+    category: good
+    tags: [happy-path]
+    input:
+      order_id: "ord-002"
+    output:
+      order_id: "ord-002"
+      status: "processing"
+      payment_status: "pending"
+
+  - id: bad_not_found
+    description: "Looking up a non-existent order should fail gracefully"
+    category: bad
+    tags: [error-handling]
+    input:
+      order_id: "ord-999"
+    output:
+      error: "order not found"
+      forbidden_content: "stack trace"
+
+  - id: bad_conflicting_payment
+    description: "Conflicting payment state requires escalation"
+    category: bad
+    tags: [regression, data-conflict]
+    input:
+      order_id: "ord-001"
+    output:
+      order_id: "ord-001"
+      status: "shipped"
+      payment_status: "conflicting"
+      forbidden_content: "paid"
+
+  - id: edge_empty_order_id
+    description: "Empty order ID should be handled"
+    category: edge
+    tags: [input-validation]
+    input:
+      order_id: ""
+    output:
+      error: "invalid order ID"

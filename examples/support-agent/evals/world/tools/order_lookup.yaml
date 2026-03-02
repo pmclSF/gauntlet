@@ -1,0 +1,26 @@
+tool: order_lookup
+description: Look up an order by ID
+states:
+  nominal:
+    response:
+      order_id: "ord-001"
+      status: "shipped"
+      tracking_number: "TRK-12345"
+      payment_status: "paid"
+      items:
+        - name: "Widget Pro"
+          quantity: 1
+          price: 49.99
+
+  timeout:
+    delay_ms: 30000
+    error: "connection timed out"
+
+  server_error:
+    status_code: 500
+    error: "Internal Server Error"
+
+  not_found:
+    response:
+      error: "order not found"
+      order_id: null

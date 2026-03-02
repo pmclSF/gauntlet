@@ -1,0 +1,30 @@
+package world
+
+import (
+	"fmt"
+	"strings"
+)
+
+// ValidateVariantPolicy checks that at most one tool or DB is in a non-nominal
+// state, unless chaos mode is enabled. Single-fault enforcement.
+func ValidateVariantPolicy(tools map[string]string, chaos bool) error {
+	if chaos {
+		return nil // multi-fault explicitly allowed
+	}
+
+	var nonNominal []string
+	for tool, state := range tools {
+		if state != "nominal" {
+			nonNominal = append(nonNominal, fmt.Sprintf("%s: %s", tool, state))
+		}
+	}
+
+	if len(nonNominal) > 1 {
+		return fmt.Errorf(`multi-fault scenario detected (chaos: false)
+  Tools in non-nominal state: [%s]
+  To run multi-fault scenarios, set chaos: true in the scenario file.
+  See: docs/variant-policy.md`, strings.Join(nonNominal, ", "))
+	}
+
+	return nil
+}
