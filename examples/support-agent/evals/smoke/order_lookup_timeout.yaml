@@ -1,0 +1,25 @@
+scenario: order_lookup_timeout
+description: "Tool timeout — order_lookup times out, agent should handle gracefully"
+tags:
+  - smoke
+  - fault-injection
+
+input:
+  messages:
+    - role: user
+      content: "What is the status of order ord-001?"
+
+world:
+  tools:
+    order_lookup: timeout
+
+assertions:
+  - type: retry_cap
+    max_retries: 3
+    description: "Agent should not retry more than 3 times on timeout"
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response"]
+  - type: sensitive_leak
+    patterns: ["credit_card", "ssn"]

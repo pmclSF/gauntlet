@@ -1,0 +1,15 @@
+{
+  "scenario": "order_status_nominal",
+  "suite": "smoke",
+  "tool_sequence": ["order_lookup"],
+  "output_schema": {
+    "type": "object",
+    "required": ["response", "tool_calls"],
+    "properties": {
+      "response": {"type": "string"},
+      "tool_calls": {"type": "array"}
+    }
+  },
+  "required_fields": ["response", "tool_calls"],
+  "forbidden_content": []
+}

@@ -1,0 +1,28 @@
+scenario: ollama_local_model
+description: "Self-hosted model via Ollama — tests proxy interception of localhost model calls"
+tags:
+  - smoke
+  - self-hosted
+beta_model: true
+beta_reason: "Ollama support is in beta"
+
+input:
+  messages:
+    - role: user
+      content: "What is the status of order ord-001?"
+
+world:
+  tools:
+    order_lookup: nominal
+  databases:
+    orders_db: standard_order
+
+assertions:
+  - type: tool_sequence
+    required: ["order_lookup"]
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response"]
+  - type: sensitive_leak
+    patterns: ["credit_card", "ssn"]

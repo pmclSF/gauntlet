@@ -1,0 +1,38 @@
+# Gauntlet policy — controls CI behavior
+version: 1
+
+suites:
+  smoke:
+    scenarios: "evals/smoke/*.yaml"
+    budget_ms: 300000  # 5 minutes
+    mode: pr_ci
+
+  full:
+    scenarios: "evals/full/*.yaml"
+    budget_ms: 900000  # 15 minutes
+    mode: nightly
+
+assertions:
+  hard_gates:
+    - output_schema
+    - tool_sequence
+    - tool_args_invariant
+    - retry_cap
+    - forbidden_tool
+
+  soft_signals:
+    - sensitive_leak
+    - output_derivable
+
+proxy:
+  addr: "localhost:7431"
+
+redaction:
+  field_paths:
+    - "**.api_key"
+    - "**.password"
+    - "**.token"
+    - "**.secret"
+  patterns:
+    - "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{1,7}\\b"  # credit card
+    - "\\b\\d{3}-\\d{2}-\\d{4}\\b"  # SSN
