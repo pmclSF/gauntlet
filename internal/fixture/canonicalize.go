@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pmclSF/gauntlet/internal/proxy/providers"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
 )
 
 // DenylistFields are stripped from all requests before canonicalization.
@@ -23,19 +23,6 @@ var DenylistSuffixes = []string{"_id", "_ts", "_at", "_timestamp"}
 
 // DenylistPrefixes are field name prefixes that cause stripping.
 var DenylistPrefixes = []string{"metadata", "extra_headers", "http_client"}
-
-// ToolDenylistFields are stripped from tool-call args before canonicalization.
-// Tool args use exact-match denylist semantics to avoid dropping legitimate
-// business identifiers such as order_id/item_id.
-var ToolDenylistFields = map[string]bool{
-	"request_id": true,
-	"timestamp":  true,
-	"trace_id":   true,
-	"session_id": true,
-}
-
-// ToolDenylistPrefixes are tool-arg key prefixes stripped before hashing.
-var ToolDenylistPrefixes = []string{"metadata.", "extra_headers."}
 
 // DenylistHeaders are HTTP headers stripped before canonicalization.
 var DenylistHeaders = map[string]bool{
@@ -57,18 +44,6 @@ func shouldStripField(key string) bool {
 		}
 	}
 	for _, prefix := range DenylistPrefixes {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func shouldStripToolField(key string) bool {
-	if ToolDenylistFields[key] {
-		return true
-	}
-	for _, prefix := range ToolDenylistPrefixes {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
@@ -103,11 +78,11 @@ func CanonicalizeRequest(cr *providers.CanonicalRequest) ([]byte, error) {
 	// Build a map for deterministic JSON serialization
 	canonical := map[string]interface{}{
 		"gauntlet_canonical_version": cr.GauntletCanonicalVersion,
-		"provider_family":            cr.ProviderFamily,
-		"model":                      cr.Model,
-		"system":                     cr.System,
-		"messages":                   cr.Messages,
-		"sampling":                   cr.Sampling,
+		"provider_family":           cr.ProviderFamily,
+		"model":                     cr.Model,
+		"system":                    cr.System,
+		"messages":                  cr.Messages,
+		"sampling":                  cr.Sampling,
 	}
 
 	// Tools sorted by name (already done in normalizers, but ensure)
@@ -131,7 +106,7 @@ func CanonicalizeToolCall(toolName string, args map[string]interface{}) ([]byte,
 	// Strip denylist fields from args
 	cleanArgs := make(map[string]interface{})
 	for k, v := range args {
-		if !shouldStripToolField(k) {
+		if !shouldStripField(k) {
 			cleanArgs[k] = v
 		}
 	}

@@ -1,7 +1,0 @@
-tool: finalize_response
-description: Produce final answer from plan and context
-
-states:
-  nominal:
-    response:
-      response: completed

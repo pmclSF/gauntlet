@@ -2,17 +2,16 @@ package output
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/pmclSF/gauntlet/internal/redaction"
 )
 
 // WriteSummary writes a GitHub-flavored Markdown summary.
 func WriteSummary(dir string, result *RunResult) error {
-	md := redaction.DefaultRedactor().RedactString(GenerateMarkdown(result))
+	md := GenerateMarkdown(result)
 	path := filepath.Join(dir, "summary.md")
-	return atomicWrite(path, []byte(md), 0o644)
+	return os.WriteFile(path, []byte(md), 0o644)
 }
 
 // GenerateMarkdown produces the Markdown summary string.

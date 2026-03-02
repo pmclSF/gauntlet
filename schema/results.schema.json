@@ -29,11 +29,6 @@
       "minimum": 0,
       "description": "Time budget in milliseconds that was configured for the run."
     },
-    "scenario_budget_ms": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Per-scenario timeout budget in milliseconds."
-    },
     "mode": {
       "type": "string",
       "description": "Execution mode used for the run (e.g. strict, lenient)."
@@ -41,95 +36,6 @@
     "egress_blocked": {
       "type": "boolean",
       "description": "Whether network egress was blocked during the run."
-    },
-    "history": {
-      "type": "object",
-      "description": "Recent historical run metadata for regression velocity tracking.",
-      "additionalProperties": false,
-      "properties": {
-        "window": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum number of prior runs included in the history window."
-        },
-        "recent": {
-          "type": "array",
-          "description": "Most recent prior runs (newest first) for the same suite.",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "run_id": {
-                "type": "string"
-              },
-              "commit": {
-                "type": "string"
-              },
-              "started_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "duration_ms": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "summary": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "total": {"type": "integer", "minimum": 0},
-                  "passed": {"type": "integer", "minimum": 0},
-                  "failed": {"type": "integer", "minimum": 0},
-                  "skipped_budget": {"type": "integer", "minimum": 0},
-                  "error": {"type": "integer", "minimum": 0}
-                }
-              }
-            }
-          }
-        },
-        "previous": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "run_id": {
-              "type": "string"
-            },
-            "commit": {
-              "type": "string"
-            },
-            "started_at": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "duration_ms": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "summary": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "total": {"type": "integer", "minimum": 0},
-                "passed": {"type": "integer", "minimum": 0},
-                "failed": {"type": "integer", "minimum": 0},
-                "skipped_budget": {"type": "integer", "minimum": 0},
-                "error": {"type": "integer", "minimum": 0}
-              }
-            }
-          }
-        },
-        "delta": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "passed": {"type": "integer"},
-            "failed": {"type": "integer"},
-            "skipped_budget": {"type": "integer"},
-            "error": {"type": "integer"},
-            "pass_rate": {"type": "number"}
-          }
-        }
-      }
     },
     "summary": {
       "type": "object",
@@ -177,22 +83,6 @@
             "type": "integer",
             "minimum": 0,
             "description": "Wall-clock duration of this scenario in milliseconds."
-          },
-          "budget_ms": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Effective timeout budget for this scenario in milliseconds."
-          },
-          "failure_category": {
-            "type": "string",
-            "enum": [
-              "assertion_failure",
-              "infra_failure",
-              "timeout",
-              "budget_exhausted",
-              "nondeterminism_warning"
-            ],
-            "description": "Deterministic causal category for scenario outcome and warnings."
           },
           "assertions": {
             "type": "array",

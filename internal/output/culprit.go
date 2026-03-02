@@ -1,17 +1,12 @@
 package output
 
-import (
-	"sort"
-
-	"github.com/pmclSF/gauntlet/internal/assertions"
-)
+import "github.com/gauntlet-dev/gauntlet/internal/assertions"
 
 // ClassifyCulprit attempts to identify the most likely cause of a failure.
 func ClassifyCulprit(results []assertions.Result, worldTools map[string]string) *Culprit {
 	if len(results) == 0 {
 		return nil
 	}
-	toolNames := sortedWorldToolNames(worldTools)
 
 	// Find the first hard-gate failure
 	for _, r := range results {
@@ -28,8 +23,7 @@ func ClassifyCulprit(results []assertions.Result, worldTools map[string]string) 
 			}
 		case "planner.premature_finalize":
 			// Check if any tool was in a non-nominal state
-			for _, tool := range toolNames {
-				state := worldTools[tool]
+			for tool, state := range worldTools {
 				if state != "nominal" {
 					return &Culprit{
 						Class:      "tool.state." + state,
@@ -44,8 +38,7 @@ func ClassifyCulprit(results []assertions.Result, worldTools map[string]string) 
 				Reasoning:  "Agent terminated before completing the required tool sequence",
 			}
 		case "tool.timeout_retrycap", "planner.retry_storm":
-			for _, tool := range toolNames {
-				state := worldTools[tool]
+			for tool, state := range worldTools {
 				if state == "timeout" || state == "server_error" {
 					return &Culprit{
 						Class:      "tool.state." + state,
@@ -85,13 +78,4 @@ func ClassifyCulprit(results []assertions.Result, worldTools map[string]string) 
 		Confidence: "low",
 		Reasoning:  "Could not determine a specific culprit",
 	}
-}
-
-func sortedWorldToolNames(worldTools map[string]string) []string {
-	keys := make([]string, 0, len(worldTools))
-	for name := range worldTools {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	return keys
 }

@@ -1,6 +1,6 @@
-module github.com/pmclSF/gauntlet
+module github.com/gauntlet-dev/gauntlet
 
-go 1.24.0
+go 1.25.7
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.34

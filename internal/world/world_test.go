@@ -1,15 +1,12 @@
 package world
 
 import (
-	"bytes"
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/pmclSF/gauntlet/internal/scenario"
 	"gopkg.in/yaml.v3"
 )
 
@@ -119,7 +116,7 @@ func TestValidateVariantPolicy_AllNominal(t *testing.T) {
 		"refund_processor": "nominal",
 		"inventory":        "nominal",
 	}
-	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
+	if err := ValidateVariantPolicy(tools, false); err != nil {
 		t.Errorf("all nominal should pass: %v", err)
 	}
 }
@@ -130,7 +127,7 @@ func TestValidateVariantPolicy_SingleFault(t *testing.T) {
 		"refund_processor": "timeout",
 		"inventory":        "nominal",
 	}
-	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
+	if err := ValidateVariantPolicy(tools, false); err != nil {
 		t.Errorf("single fault should pass: %v", err)
 	}
 }
@@ -141,7 +138,7 @@ func TestValidateVariantPolicy_MultiFaultRejected(t *testing.T) {
 		"refund_processor": "server_error",
 		"inventory":        "nominal",
 	}
-	err := ValidateVariantPolicy(tools, nil, false)
+	err := ValidateVariantPolicy(tools, false)
 	if err == nil {
 		t.Fatal("expected error for multi-fault without chaos")
 	}
@@ -160,19 +157,19 @@ func TestValidateVariantPolicy_MultiFaultAllowedWithChaos(t *testing.T) {
 		"refund_processor": "server_error",
 		"inventory":        "malformed_response",
 	}
-	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
+	if err := ValidateVariantPolicy(tools, true); err != nil {
 		t.Errorf("multi-fault with chaos=true should pass: %v", err)
 	}
 }
 
 func TestValidateVariantPolicy_EmptyTools(t *testing.T) {
-	if err := ValidateVariantPolicy(map[string]string{}, nil, false); err != nil {
+	if err := ValidateVariantPolicy(map[string]string{}, false); err != nil {
 		t.Errorf("empty tools should pass: %v", err)
 	}
 }
 
 func TestValidateVariantPolicy_NilTools(t *testing.T) {
-	if err := ValidateVariantPolicy(nil, nil, false); err != nil {
+	if err := ValidateVariantPolicy(nil, false); err != nil {
 		t.Errorf("nil tools should pass: %v", err)
 	}
 }
@@ -183,32 +180,8 @@ func TestValidateVariantPolicy_AllNonNominalChaos(t *testing.T) {
 		"b": "server_error",
 		"c": "malformed_response",
 	}
-	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
+	if err := ValidateVariantPolicy(tools, true); err != nil {
 		t.Errorf("all non-nominal with chaos=true should pass: %v", err)
-	}
-}
-
-func TestValidateVariantPolicy_MultiFaultChaosLogsWarning(t *testing.T) {
-	var buf bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	defer func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	}()
-
-	tools := map[string]string{
-		"order_lookup":     "timeout",
-		"refund_processor": "server_error",
-	}
-	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	msg := buf.String()
-	if !strings.Contains(msg, "chaos=true with multi-fault scenario") {
-		t.Fatalf("expected warning log, got: %q", msg)
 	}
 }
 
@@ -216,46 +189,8 @@ func TestValidateVariantPolicy_SingleToolNonNominal(t *testing.T) {
 	tools := map[string]string{
 		"solo": "server_error",
 	}
-	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
+	if err := ValidateVariantPolicy(tools, false); err != nil {
 		t.Errorf("single tool non-nominal should pass single-fault: %v", err)
-	}
-}
-
-func TestValidateVariantPolicy_StandardDatabaseSeedIsNominal(t *testing.T) {
-	databases := map[string]scenario.DBSpec{
-		"orders_db": {SeedSets: []string{"standard_order"}},
-	}
-	if err := ValidateVariantPolicy(nil, databases, false); err != nil {
-		t.Fatalf("standard seed set should be treated as nominal: %v", err)
-	}
-}
-
-func TestValidateVariantPolicy_OneDatabaseFaultAllowed(t *testing.T) {
-	databases := map[string]scenario.DBSpec{
-		"orders_db": {SeedSets: []string{"conflicting_state"}},
-	}
-	if err := ValidateVariantPolicy(nil, databases, false); err != nil {
-		t.Fatalf("single database fault should pass: %v", err)
-	}
-}
-
-func TestValidateVariantPolicy_ToolAndDatabaseFaultRejected(t *testing.T) {
-	tools := map[string]string{
-		"order_lookup": "timeout",
-	}
-	databases := map[string]scenario.DBSpec{
-		"orders_db": {SeedSets: []string{"conflicting_state"}},
-	}
-	err := ValidateVariantPolicy(tools, databases, false)
-	if err == nil {
-		t.Fatal("expected error when tool + database are both non-nominal")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "tool order_lookup") {
-		t.Fatalf("expected tool detail in error, got: %s", msg)
-	}
-	if !strings.Contains(msg, "db orders_db") {
-		t.Fatalf("expected db detail in error, got: %s", msg)
 	}
 }
 
@@ -269,14 +204,14 @@ func TestLoadToolDef_FromFile(t *testing.T) {
 tool: order_lookup
 states:
   nominal:
-    response_code: 200
+    status_code: 200
     behavior: returns order info
     agent_expectation: should relay status
     response:
       order_id: "ord-001"
       status: "shipped"
   timeout:
-    response_code: 504
+    status_code: 504
     behavior: gateway timeout
     delay_ms: 30000
     error: "connection timed out"
@@ -320,31 +255,6 @@ states:
 	}
 	if timeout.Error != "connection timed out" {
 		t.Errorf("timeout Error = %q", timeout.Error)
-	}
-}
-
-func TestLoadToolDef_LegacyStatusCodeAliasStillSupported(t *testing.T) {
-	dir := t.TempDir()
-	content := `
-tool: order_lookup
-states:
-  nominal:
-    status_code: 201
-`
-	path := filepath.Join(dir, "order_lookup.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write: %v", err)
-	}
-	td, err := LoadToolDef(path)
-	if err != nil {
-		t.Fatalf("LoadToolDef failed: %v", err)
-	}
-	nominal := td.States["nominal"]
-	if nominal == nil {
-		t.Fatal("missing 'nominal' state")
-	}
-	if nominal.StatusCode != 201 {
-		t.Fatalf("StatusCode = %d, want 201", nominal.StatusCode)
 	}
 }
 
@@ -435,7 +345,7 @@ seed_sets:
 		t.Fatalf("failed to write DB: %v", err)
 	}
 
-	state, err := Assemble(toolsDir, dbDir)
+	state, err := Assemble(toolsDir, dbDir, nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}
@@ -456,7 +366,7 @@ seed_sets:
 func TestAssemble_EmptyDirectories(t *testing.T) {
 	toolsDir := t.TempDir()
 	dbDir := t.TempDir()
-	state, err := Assemble(toolsDir, dbDir)
+	state, err := Assemble(toolsDir, dbDir, nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}
@@ -470,7 +380,7 @@ func TestAssemble_EmptyDirectories(t *testing.T) {
 
 func TestAssemble_NonexistentDirsAreOK(t *testing.T) {
 	// Empty string dirs should not trigger errors
-	state, err := Assemble("", "")
+	state, err := Assemble("", "", nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble with empty dirs failed: %v", err)
 	}
@@ -494,7 +404,7 @@ func TestAssemble_MultipleToolFiles(t *testing.T) {
 		}
 	}
 
-	state, err := Assemble(toolsDir, "")
+	state, err := Assemble(toolsDir, "", nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}

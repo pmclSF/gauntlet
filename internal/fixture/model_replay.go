@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pmclSF/gauntlet/internal/proxy/providers"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
 )
 
 // ModelReplay intercepts model calls (via proxy) and serves fixture responses.
 type ModelReplay struct {
-	Store  *Store
-	Suite  string
-	Traces []ModelCallTrace
+	Store   *Store
+	Suite   string
+	Traces  []ModelCallTrace
 }
 
 // ModelCallTrace records a single model call for assertion evaluation.
@@ -42,36 +42,25 @@ func (r *ModelReplay) Replay(cr *providers.CanonicalRequest) (*ModelFixture, err
 		return nil, fmt.Errorf("failed to load model fixture: %w", err)
 	}
 	if fixture == nil {
-		candidates, _ := r.Store.NearestModelFixtureCandidates(cr.ProviderFamily, cr.Model, hash, 3)
 		return nil, &ErrFixtureMiss{
-			FixtureType:    "model:" + cr.Model,
-			ProviderFamily: cr.ProviderFamily,
-			Model:          cr.Model,
-			CanonicalHash:  hash,
-			CanonicalJSON:  string(canonical),
-			RecordCmd:      fmt.Sprintf("GAUNTLET_MODEL_MODE=live gauntlet record --suite %s", r.Suite),
-			Candidates:     candidates,
+			FixtureType:   "model:" + cr.Model,
+			CanonicalHash: hash,
+			CanonicalJSON: string(canonical),
+			RecordCmd:     fmt.Sprintf("GAUNTLET_MODEL_MODE=live gauntlet record --suite %s", r.Suite),
 		}
 	}
-	normalizer := providers.NormalizerForFamily(cr.ProviderFamily)
-	normalizedResponse, err := normalizer.NormalizeResponseForFixture(fixture.Response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize fixture response for %s: %w", cr.ProviderFamily, err)
-	}
-	fixtureCopy := *fixture
-	fixtureCopy.Response = normalizedResponse
 
 	// Record trace
 	r.Traces = append(r.Traces, ModelCallTrace{
 		ProviderFamily: cr.ProviderFamily,
 		Model:          cr.Model,
 		CanonicalHash:  hash,
-		Response:       fixtureCopy.Response,
+		Response:       fixture.Response,
 		FixtureUsed:    fixture.CanonicalHash,
 		Timestamp:      time.Now(),
 	})
 
-	return &fixtureCopy, nil
+	return fixture, nil
 }
 
 // Reset clears recorded traces for a new scenario.

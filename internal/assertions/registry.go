@@ -5,10 +5,9 @@ package assertions
 
 import (
 	"encoding/json"
-	"sort"
 
-	"github.com/pmclSF/gauntlet/internal/scenario"
-	"github.com/pmclSF/gauntlet/internal/tut"
+	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/gauntlet-dev/gauntlet/internal/tut"
 )
 
 // Assertion evaluates a single check against a scenario run.
@@ -24,14 +23,12 @@ type Assertion interface {
 // Context provides all data needed for assertion evaluation.
 type Context struct {
 	ScenarioName string
-	RunnerMode   string
 	Input        scenario.Input
 	Output       tut.AgentOutput
 	ToolTrace    []tut.TraceEvent
 	WorldState   WorldState
 	Baseline     *ContractBaseline
 	FixtureUsed  map[string]string
-	Spec         map[string]interface{}
 }
 
 // WorldState represents the assembled world state for assertion context.
@@ -87,17 +84,6 @@ func Get(typeName string) (Assertion, bool) {
 	return a, ok
 }
 
-// RegisteredTypes returns all registered assertion type names sorted
-// lexicographically for deterministic policy validation and messaging.
-func RegisteredTypes() []string {
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // EvaluateAll runs all assertions from a scenario spec against the context.
 func EvaluateAll(specs []scenario.AssertionSpec, ctx Context) []Result {
 	var results []Result
@@ -112,14 +98,8 @@ func EvaluateAll(specs []scenario.AssertionSpec, ctx Context) []Result {
 			})
 			continue
 		}
-		specCtx := ctx
-		specCtx.Spec = spec.Raw
-		result := a.Evaluate(specCtx)
-		if result.AssertionType == "" {
-			result.AssertionType = spec.Type
-		}
-		// Enforce registry soft/hard contract even if assertion impl forgets.
-		result.Soft = a.IsSoft()
+		// Inject spec properties into context if needed
+		result := a.Evaluate(ctx)
 		results = append(results, result)
 	}
 	return results
@@ -131,13 +111,6 @@ func init() {
 	Register(&ToolArgsAssertion{})
 	Register(&RetryCapAssertion{})
 	Register(&ForbiddenToolAssertion{})
-	Register(&ForbiddenContentAssertion{})
-	Register(&PIIAbsentAssertion{})
 	Register(&OutputDerivableAssertion{})
 	Register(&SensitiveLeakAssertion{})
-	Register(&ModelCallCountAssertion{})
-	Register(&CostBudgetAssertion{})
-	Register(&LatencyP99Assertion{})
-	Register(&SemanticMatchAssertion{})
-	Register(&TokenBudgetAssertion{})
 }

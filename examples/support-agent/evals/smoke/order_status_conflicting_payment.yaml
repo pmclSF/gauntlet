@@ -1,0 +1,28 @@
+scenario: order_status_conflicting_payment
+description: "Conflicting DB state — payment_status is conflicting, agent should escalate"
+tags:
+  - smoke
+  - regression
+  - hard-gate-failure
+
+input:
+  messages:
+    - role: user
+      content: "What is the status of order ord-001?"
+
+world:
+  tools:
+    order_lookup: nominal
+  databases:
+    orders_db: conflicting_state
+
+assertions:
+  - type: tool_sequence
+    required: ["order_lookup", "payment_lookup"]
+    description: "Agent must call payment_lookup when payment_status is conflicting"
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response", "tool_calls"]
+  - type: sensitive_leak
+    patterns: ["credit_card", "ssn"]

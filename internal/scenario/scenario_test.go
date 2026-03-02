@@ -3,7 +3,6 @@ package scenario
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -30,12 +29,11 @@ world:
       seed_sets:
         - default_orders
 assertions:
-  - type: tool_sequence
-    required:
-      - refund_processor
-  - type: output_schema
-    schema:
-      type: object
+  - type: tool_called
+    tool: refund_processor
+  - type: json_match
+    path: $.status
+    value: refunded
 chaos: false
 tags:
   - refund
@@ -79,11 +77,11 @@ beta_reason: requires tool chaining
 	if len(s.Assertions) != 2 {
 		t.Fatalf("expected 2 assertions, got %d", len(s.Assertions))
 	}
-	if s.Assertions[0].Type != "tool_sequence" {
-		t.Errorf("Assertions[0].Type = %q, want %q", s.Assertions[0].Type, "tool_sequence")
+	if s.Assertions[0].Type != "tool_called" {
+		t.Errorf("Assertions[0].Type = %q, want %q", s.Assertions[0].Type, "tool_called")
 	}
-	if s.Assertions[1].Type != "output_schema" {
-		t.Errorf("Assertions[1].Type = %q, want %q", s.Assertions[1].Type, "output_schema")
+	if s.Assertions[1].Type != "json_match" {
+		t.Errorf("Assertions[1].Type = %q, want %q", s.Assertions[1].Type, "json_match")
 	}
 	if s.Chaos {
 		t.Error("Chaos should be false")
@@ -110,7 +108,7 @@ input:
 world:
   tools: {}
 assertions:
-  - type: sensitive_leak
+  - type: status_ok
 `
 	var s Scenario
 	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
@@ -133,40 +131,6 @@ assertions:
 	}
 }
 
-func TestScenarioYAMLParsing_MultimodalMessageContent(t *testing.T) {
-	raw := `
-scenario: multimodal_test
-input:
-  messages:
-    - role: user
-      content:
-        - type: text
-          text: "describe this image"
-        - type: image_url
-          image_url:
-            url: "data:image/png;base64,AQI="
-world:
-  tools: {}
-assertions:
-  - type: tool_sequence
-    required: ["order_lookup"]
-`
-	var s Scenario
-	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(s.Input.Messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(s.Input.Messages))
-	}
-	content, ok := s.Input.Messages[0].Content.([]interface{})
-	if !ok {
-		t.Fatalf("expected multimodal content array, got %T", s.Input.Messages[0].Content)
-	}
-	if len(content) != 2 {
-		t.Fatalf("expected 2 content parts, got %d", len(content))
-	}
-}
-
 func TestScenarioYAMLParsing_AssertionInlineFields(t *testing.T) {
 	raw := `
 scenario: inline_test
@@ -178,9 +142,10 @@ input:
 world:
   tools: {}
 assertions:
-  - type: tool_args_invariant
-    tool: lookup_order
-    invariant: "args.order_id == input.order_id"
+  - type: json_match
+    path: $.result
+    value: ok
+    exact: true
 `
 	var s Scenario
 	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
@@ -190,14 +155,17 @@ assertions:
 		t.Fatalf("expected 1 assertion, got %d", len(s.Assertions))
 	}
 	a := s.Assertions[0]
-	if a.Type != "tool_args_invariant" {
+	if a.Type != "json_match" {
 		t.Errorf("Type = %q", a.Type)
 	}
-	if a.Raw["tool"] != "lookup_order" {
-		t.Errorf("Raw[tool] = %v", a.Raw["tool"])
+	if a.Raw["path"] != "$.result" {
+		t.Errorf("Raw[path] = %v", a.Raw["path"])
 	}
-	if a.Raw["invariant"] != "args.order_id == input.order_id" {
-		t.Errorf("Raw[invariant] = %v", a.Raw["invariant"])
+	if a.Raw["value"] != "ok" {
+		t.Errorf("Raw[value] = %v", a.Raw["value"])
+	}
+	if a.Raw["exact"] != true {
+		t.Errorf("Raw[exact] = %v", a.Raw["exact"])
 	}
 }
 
@@ -251,9 +219,8 @@ world:
   tools:
     echo: nominal
 assertions:
-  - type: output_schema
-    schema:
-      type: object
+  - type: contains
+    text: pong
 `
 	path := writeTemp(t, dir, "test.yaml", yaml)
 	s, err := LoadFile(path)
@@ -271,25 +238,6 @@ assertions:
 	}
 	if s.World.Tools["echo"] != "nominal" {
 		t.Errorf("Tools[echo] = %q", s.World.Tools["echo"])
-	}
-}
-
-func TestLoadFile_AssertionDescriptionAllowed(t *testing.T) {
-	dir := t.TempDir()
-	yaml := `
-scenario: assertion_description
-input:
-  messages:
-    - role: user
-      content: ping
-assertions:
-  - type: forbidden_tool
-    forbidden: ["send_email"]
-    description: should not invoke send_email
-`
-	path := writeTemp(t, dir, "assertion_description.yaml", yaml)
-	if _, err := LoadFile(path); err != nil {
-		t.Fatalf("LoadFile failed with assertion description: %v", err)
 	}
 }
 
@@ -365,49 +313,6 @@ input:
 	}
 }
 
-func TestLoadFile_InvalidAssertionType(t *testing.T) {
-	dir := t.TempDir()
-	yaml := `
-scenario: invalid_assertion_type
-input:
-  messages:
-    - role: user
-      content: hello
-assertions:
-  - type: totally_unknown_assertion
-`
-	path := writeTemp(t, dir, "invalid_assertion.yaml", yaml)
-	_, err := LoadFile(path)
-	if err == nil {
-		t.Fatal("expected schema validation error for unknown assertion type")
-	}
-	if got := err.Error(); !contains(got, "schema validation failed") {
-		t.Fatalf("unexpected error: %s", got)
-	}
-}
-
-func TestLoadFile_MissingRequiredAssertionField(t *testing.T) {
-	dir := t.TempDir()
-	yaml := `
-scenario: invalid_assertion_shape
-input:
-  messages:
-    - role: user
-      content: hello
-assertions:
-  - type: tool_args_invariant
-    tool: order_lookup
-`
-	path := writeTemp(t, dir, "invalid_assertion_shape.yaml", yaml)
-	_, err := LoadFile(path)
-	if err == nil {
-		t.Fatal("expected schema validation error for missing assertion field")
-	}
-	if got := err.Error(); !contains(got, "schema validation failed") {
-		t.Fatalf("unexpected error: %s", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // LoadSuite
 // ---------------------------------------------------------------------------
@@ -446,44 +351,6 @@ assertions: []
 	}
 	if !names["alpha"] || !names["beta"] {
 		t.Errorf("unexpected scenario names: %v", names)
-	}
-}
-
-func TestLoadSuite_DuplicateScenarioNamesFail(t *testing.T) {
-	dir := t.TempDir()
-	first := writeTemp(t, dir, "a.yaml", `
-scenario: duplicate_case
-input:
-  messages:
-    - role: user
-      content: hello
-assertions: []
-`)
-	second := writeTemp(t, dir, "b.yaml", `
-scenario: duplicate_case
-input:
-  messages:
-    - role: user
-      content: world
-assertions: []
-`)
-
-	_, err := LoadSuite(dir)
-	if err == nil {
-		t.Fatal("expected duplicate scenario name error")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, `duplicate scenario name "duplicate_case"`) {
-		t.Fatalf("error missing duplicate name details: %s", msg)
-	}
-	if !strings.Contains(msg, first+":1") {
-		t.Fatalf("error missing first file path: %s", msg)
-	}
-	if !strings.Contains(msg, second+":1") {
-		t.Fatalf("error missing second file path: %s", msg)
-	}
-	if !strings.Contains(msg, "scenario names must be unique across the suite") {
-		t.Fatalf("error missing remediation guidance: %s", msg)
 	}
 }
 

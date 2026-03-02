@@ -42,7 +42,6 @@ make test           # run all Go tests with -race
 make test-example   # integration test against examples/support-agent
 make lint           # golangci-lint
 make proxy-test     # run proxy interception tests specifically
-make test-autosuite # run auto-discovery pipeline tests
 ```
 
 ## Directory rules
@@ -57,8 +56,6 @@ make test-autosuite # run auto-discovery pipeline tests
 - DB world definitions: `evals/world/databases/`
 - Fixtures: `evals/fixtures/tools/` and `evals/fixtures/models/`
 - Baselines: `evals/baselines/<suite>/`
-- Auto-generated scenarios: `evals/<suite>/auto_*.yaml` (created by --auto-discover)
-- IO pair libraries: `evals/pairs/*.yaml`
 - Run artifacts: `evals/runs/<timestamp>-<commit>/`
 
 ## Error message standard
@@ -90,27 +87,6 @@ NEVER output bare Go error strings to the user.
 4. Add test with at least: passing case, failing case, edge case
 5. Add docket classification rule in `internal/docket/classifier.go`
 6. Document whether it is a hard gate or soft signal
-
-## Auto-discovery pipeline
-
-`gauntlet run --auto-discover` (on by default) scans the codebase for tools,
-DB schemas, and Python @gauntlet.tool decorators, then generates scenario YAML
-files in the suite directory.
-
-Sources:
-- Tool world definitions (evals/world/tools/*.yaml) → one scenario per tool×variant
-- Database seed definitions (evals/world/databases/*.yaml) → one scenario per DB×seed
-- Python decorators (@gauntlet.tool, @function_tool, @agent.tool, @tool) → one nominal scenario per tool
-
-Enrichment:
-- IO pair libraries (evals/pairs/*.yaml) provide realistic inputs and derived assertions
-
-Skip conditions:
-- Manual scenarios exist in suite dir → skip (use --discover-force to override)
-- Auto scenarios are up to date (hash match) → skip
-- --auto-discover=false → skip entirely
-
-Generated files have a `# gauntlet:auto-generated` header and are safe to delete.
 
 ## Do not build in v1
 

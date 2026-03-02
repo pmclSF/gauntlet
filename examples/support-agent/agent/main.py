@@ -36,9 +36,8 @@ def handle_request(input_data: dict) -> dict:
         # Extract order ID
         order_id = None
         for word in last_message.split():
-            normalized = word.strip(".,!?\"'()[]{}")
-            if normalized.startswith("ord-") or normalized.startswith("ORD-"):
-                order_id = normalized
+            if word.startswith("ord-") or word.startswith("ORD-"):
+                order_id = word
                 break
 
         if order_id:

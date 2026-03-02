@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
-	"sync"
 	"time"
 
-	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 )
 
 // HTTPAdapter is the "Best" and "Good" integration level adapter.
@@ -21,60 +19,21 @@ type HTTPAdapter struct{}
 
 func (a *HTTPAdapter) Level() IntegrationLevel { return LevelBest }
 
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
 func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) {
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
 	cmd.Dir = config.WorkDir
 
-	// Build environment.
-	cmd.Env = mergedProcessEnv(config.Env, config.RestrictHostEnv)
-
-	// Create temp file for trace events.
-	traceFile, err := os.CreateTemp("", "gauntlet-trace-*.ndjson")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create trace file: %w", err)
+	// Build environment
+	env := make([]string, 0, len(config.Env))
+	for k, v := range config.Env {
+		env = append(env, k+"="+v)
 	}
-	tracePath := traceFile.Name()
-	traceFile.Close()
-	cmd.Env = append(cmd.Env, "GAUNTLET_TRACE_FILE="+tracePath)
+	cmd.Env = env
 
-	var stderr lockedBuffer
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if config.BlockNetworkEgress {
-		wrapped, err := wrapWithEgressBlock(cmd)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply egress block to TUT command: %w", err)
-		}
-		cmd = wrapped
-	}
-	cmd, err = wrapWithHostilePayloadGuardrails(cmd, config.Guardrails)
-	if err != nil {
-		return nil, fmt.Errorf("failed to apply hostile payload guardrails: %w", err)
-	}
-	cmd, err = wrapWithResourceLimits(cmd, config.ResourceLimits)
-	if err != nil {
-		return nil, fmt.Errorf("failed to apply TUT resource limits: %w", err)
-	}
-
 	if err := cmd.Start(); err != nil {
-		os.Remove(tracePath)
 		return nil, fmt.Errorf("failed to start TUT: %w", err)
 	}
 
@@ -95,41 +54,31 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	}
 
 	deadline := time.Now().Add(startupTimeout)
-	ready := false
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/health")
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				ready = true
 				break
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if !ready {
-		_ = cmd.Process.Kill()
-		os.Remove(tracePath)
-		return nil, fmt.Errorf("TUT did not become healthy at %s/health within %s (stderr: %s)", baseURL, startupTimeout, stderr.String())
-	}
 
 	return &httpHandle{
-		cmd:       cmd,
-		baseURL:   baseURL,
-		path:      path,
-		stderr:    &stderr,
-		tracePath: tracePath,
+		cmd:     cmd,
+		baseURL: baseURL,
+		path:    path,
+		stderr:  &stderr,
 	}, nil
 }
 
 type httpHandle struct {
-	cmd          *exec.Cmd
-	baseURL      string
-	path         string
-	stderr       *lockedBuffer
-	tracePath    string
-	traces       []TraceEvent
-	capabilities *SDKCapabilities
+	cmd     *exec.Cmd
+	baseURL string
+	path    string
+	stderr  *bytes.Buffer
+	traces  []TraceEvent
 }
 
 func (h *httpHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput, error) {
@@ -172,24 +121,10 @@ func (h *httpHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutpu
 }
 
 func (h *httpHandle) Traces() []TraceEvent {
-	// Parse trace file on each call to get accumulated events.
-	if h.tracePath != "" {
-		if traces, err := parseTraceFile(h.tracePath); err == nil {
-			h.traces = traces
-			h.capabilities = ExtractSDKCapabilities(traces)
-		}
-	}
 	return h.traces
 }
 
-func (h *httpHandle) Capabilities() *SDKCapabilities {
-	return cloneSDKCapabilities(h.capabilities)
-}
-
 func (h *httpHandle) Stop(ctx context.Context) error {
-	if h.tracePath != "" {
-		os.Remove(h.tracePath)
-	}
 	if h.cmd.Process != nil {
 		return h.cmd.Process.Kill()
 	}

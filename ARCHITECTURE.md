@@ -187,25 +187,6 @@ Model API keys = empty string      Model API keys = real values
 6. Locale freeze — GAUNTLET_LOCALE + GAUNTLET_TIMEZONE injected
 7. Output canonicalization — JSON sorted before comparison
 
-## Auto-discovery pipeline
-
-```
-gauntlet run --suite smoke --auto-discover
-  ├─ 1. Discover: scan tools, DBs, Python decorators → proposals
-  ├─ 2. Load IO pairs (if present) → derived assertions
-  ├─ 3. Load world definitions → available tool states, DB seeds
-  ├─ 4. Materialize: proposals × world state → scenario YAML files
-  ├─ 5. Runner loads generated scenarios from suite dir
-  └─ 6. Normal execution: proxy → TUT → assertions → output
-```
-
-Generated scenarios live in `evals/<suite>/auto_*.yaml` with a
-`# gauntlet:auto-generated` header. Manual scenarios in the same directory
-cause auto-discovery to skip (use `--discover-force` to override).
-
-Hash-based staleness detection: if tool/DB definitions and proposals
-haven't changed, auto scenarios are not regenerated.
-
 ## Self-hosted model handling
 
 For local model servers (Ollama, vLLM, llama.cpp, etc.):
@@ -214,28 +195,3 @@ The proxy intercepts calls to localhost:* and loopback addresses.
 In recorded mode: calls to localhost:11434 (Ollama) return fixtures.
 In live mode: calls to localhost:11434 are forwarded to the real server.
 The model server must be running in live mode. In recorded mode, it need not exist.
-
-## Streaming behavior
-
-Gauntlet records deterministic, non-streaming model fixtures.
-
-- OpenAI-compatible requests: `stream:true` is removed before live forwarding.
-- Ollama native `/api/chat` and `/api/generate`: `stream:true` is forced to `false`.
-- Gemini requests:
-  - live streaming path `:streamGenerateContent` is rewritten to `:generateContent`
-  - the original request canonical form includes `extra.original_path_was_streaming=true`
-  - streaming chunk responses are merged into a single candidate text response for fixture storage.
-
-This means replay mode validates functional outputs and tool behavior, not client-side
-stream-consumption behavior.
-
-## Multi-modal inputs
-
-Canonical request hashing supports text + image/document content parts.
-
-- Inline images are decoded and hashed (`sha256(raw_bytes)`), then stored as `image_hash`.
-- Remote image/file references store the URI string in `image_hash`.
-- Raw base64 payloads are never stored in canonical request fixtures.
-
-Two semantically identical images with different base64 padding/format normalize to
-the same content hash, so fixture lookup is stable across SDK/client encoding differences.

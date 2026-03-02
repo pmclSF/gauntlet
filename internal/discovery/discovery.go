@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,21 +17,17 @@ type Proposal struct {
 	ID          string   `json:"id" yaml:"id"`
 	Name        string   `json:"name" yaml:"name"`
 	Description string   `json:"description" yaml:"description"`
-	Tool        string   `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Variant     string   `json:"variant,omitempty" yaml:"variant,omitempty"`
-	Database    string   `json:"database,omitempty" yaml:"database,omitempty"`
-	SeedSet     string   `json:"seed_set,omitempty" yaml:"seed_set,omitempty"`
-	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
-	Status      string   `json:"status" yaml:"status"`                             // pending, approved, rejected
-	Source      string   `json:"source" yaml:"source"`                             // how it was discovered
-	Framework   string   `json:"framework,omitempty" yaml:"framework,omitempty"`   // originating framework (gauntlet, pydantic-ai, openai-agents, langchain)
+	Tool        string   `json:"tool" yaml:"tool"`
+	Variant     string   `json:"variant" yaml:"variant"`
+	Tags        []string `json:"tags" yaml:"tags"`
+	Status      string   `json:"status" yaml:"status"` // pending, approved, rejected
+	Source      string   `json:"source" yaml:"source"` // how it was discovered
 }
 
 // DiscoveryConfig controls what the discovery engine scans.
 type DiscoveryConfig struct {
 	RootDir      string   `yaml:"root_dir"`
 	ToolDirs     []string `yaml:"tool_dirs"`
-	PythonDirs   []string `yaml:"python_dirs"`
 	DBSchemaDir  string   `yaml:"db_schema_dir"`
 	TraceDir     string   `yaml:"trace_dir"`
 	ExcludeTools []string `yaml:"exclude_tools"`
@@ -66,123 +61,14 @@ func (e *Engine) Discover() ([]Proposal, error) {
 	}
 	proposals = append(proposals, dbProposals...)
 
-	// Discover from Python @gauntlet.tool decorators
-	pythonProposals, err := e.discoverFromPythonTools()
-	if err != nil {
-		return nil, fmt.Errorf("python tool discovery failed: %w", err)
-	}
-	proposals = append(proposals, pythonProposals...)
-
-	// Merge by stable identity key to avoid duplicates from multiple sources.
-	merged := make(map[string]Proposal, len(proposals))
-	for _, p := range proposals {
-		key := proposalKey(p)
-		if existing, ok := merged[key]; ok {
-			// Prefer sources with richer scenario context.
-			if proposalSourcePriority(p.Source) > proposalSourcePriority(existing.Source) {
-				p.Tags = mergeTags(existing.Tags, p.Tags)
-				p.Source = mergeSources(existing.Source, p.Source)
-				merged[key] = p
-			} else {
-				existing.Tags = mergeTags(existing.Tags, p.Tags)
-				existing.Source = mergeSources(existing.Source, p.Source)
-				merged[key] = existing
-			}
-			continue
-		}
-		merged[key] = p
-	}
-
-	var deduped []Proposal
-	for _, p := range merged {
-		deduped = append(deduped, p)
-	}
-	sort.SliceStable(deduped, func(i, j int) bool {
-		if deduped[i].Tool != deduped[j].Tool {
-			return deduped[i].Tool < deduped[j].Tool
-		}
-		return deduped[i].Variant < deduped[j].Variant
-	})
-	return deduped, nil
-}
-
-func proposalSourcePriority(source string) int {
-	parts := strings.Split(source, "+")
-	best := 0
-	for _, part := range parts {
-		switch strings.TrimSpace(part) {
-		case "tool_definition":
-			if best < 3 {
-				best = 3
-			}
-		case "python_tool_ast":
-			if best < 2 {
-				best = 2
-			}
-		case "db_schema":
-			if best < 1 {
-				best = 1
-			}
-		}
-	}
-	return best
-}
-
-func proposalKey(p Proposal) string {
-	switch {
-	case p.Tool != "":
-		return "tool:" + p.Tool + "|" + p.Variant
-	case p.Database != "":
-		return "db:" + p.Database + "|" + p.SeedSet
-	default:
-		return "misc:" + p.ID + "|" + p.Name
-	}
-}
-
-func mergeTags(a, b []string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
-	var out []string
-	for _, tag := range a {
-		if seen[tag] || tag == "" {
-			continue
-		}
-		seen[tag] = true
-		out = append(out, tag)
-	}
-	for _, tag := range b {
-		if seen[tag] || tag == "" {
-			continue
-		}
-		seen[tag] = true
-		out = append(out, tag)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func mergeSources(a, b string) string {
-	seen := map[string]bool{}
-	var parts []string
-	for _, source := range strings.Split(a+"+"+b, "+") {
-		s := strings.TrimSpace(source)
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		parts = append(parts, s)
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, "+")
+	return proposals, nil
 }
 
 func (e *Engine) discoverFromTools() ([]Proposal, error) {
 	var proposals []Proposal
 
 	for _, dir := range e.Config.ToolDirs {
-		toolDir := dir
-		if !filepath.IsAbs(toolDir) {
-			toolDir = filepath.Join(e.Config.RootDir, dir)
-		}
+		toolDir := filepath.Join(e.Config.RootDir, dir)
 		entries, err := os.ReadDir(toolDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -216,7 +102,7 @@ func (e *Engine) discoverFromTools() ([]Proposal, error) {
 					Variant:     variant,
 					Tags:        []string{"auto-discovered", "tool-variant"},
 					Status:      "pending",
-					Source:      "tool_definition",
+					Source:       "tool_definition",
 				})
 			}
 		}
@@ -232,10 +118,7 @@ func (e *Engine) discoverFromDB() ([]Proposal, error) {
 		return nil, nil
 	}
 
-	dbDir := e.Config.DBSchemaDir
-	if !filepath.IsAbs(dbDir) {
-		dbDir = filepath.Join(e.Config.RootDir, e.Config.DBSchemaDir)
-	}
+	dbDir := filepath.Join(e.Config.RootDir, e.Config.DBSchemaDir)
 	entries, err := os.ReadDir(dbDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -249,54 +132,15 @@ func (e *Engine) discoverFromDB() ([]Proposal, error) {
 			continue
 		}
 
-		path := filepath.Join(dbDir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		var parsed struct {
-			Database string                 `yaml:"database"`
-			SeedSets map[string]interface{} `yaml:"seed_sets"`
-		}
-		if err := yaml.Unmarshal(data, &parsed); err != nil {
-			return nil, err
-		}
-
-		dbName := strings.TrimSpace(parsed.Database)
-		if dbName == "" {
-			dbName = strings.TrimSuffix(entry.Name(), ".yaml")
-		}
-
-		if len(parsed.SeedSets) == 0 {
-			proposals = append(proposals, Proposal{
-				ID:          fmt.Sprintf("disc-db-%s", dbName),
-				Name:        fmt.Sprintf("db_%s_seed_test", dbName),
-				Description: fmt.Sprintf("Auto-discovered: test with %s database seed", dbName),
-				Database:    dbName,
-				Tags:        []string{"auto-discovered", "db-seed"},
-				Status:      "pending",
-				Source:      "db_schema",
-			})
-			continue
-		}
-
-		var seedNames []string
-		for seed := range parsed.SeedSets {
-			seedNames = append(seedNames, seed)
-		}
-		sort.Strings(seedNames)
-		for _, seed := range seedNames {
-			proposals = append(proposals, Proposal{
-				ID:          fmt.Sprintf("disc-db-%s-%s", dbName, sanitizeID(seed)),
-				Name:        fmt.Sprintf("db_%s_%s_seed_test", dbName, seed),
-				Description: fmt.Sprintf("Auto-discovered: test with %s/%s seed set", dbName, seed),
-				Database:    dbName,
-				SeedSet:     seed,
-				Tags:        []string{"auto-discovered", "db-seed"},
-				Status:      "pending",
-				Source:      "db_schema",
-			})
-		}
+		dbName := strings.TrimSuffix(entry.Name(), ".yaml")
+		proposals = append(proposals, Proposal{
+			ID:          fmt.Sprintf("disc-db-%s", dbName),
+			Name:        fmt.Sprintf("db_%s_seed_test", dbName),
+			Description: fmt.Sprintf("Auto-discovered: test with %s database seed", dbName),
+			Tags:        []string{"auto-discovered", "db-seed"},
+			Status:      "pending",
+			Source:       "db_schema",
+		})
 	}
 
 	return proposals, nil
@@ -329,4 +173,23 @@ func (e *Engine) isExcluded(toolName string) bool {
 		}
 	}
 	return false
+}
+
+// SaveProposals writes proposals to a YAML file.
+func SaveProposals(proposals []Proposal, path string) error {
+	data, err := yaml.Marshal(proposals)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// LoadProposals reads proposals from a YAML file.
+func LoadProposals(path string) ([]Proposal, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var proposals []Proposal
+	return proposals, yaml.Unmarshal(data, &proposals)
 }

@@ -16,7 +16,6 @@ func LoadFile(path string) (*Scenario, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read scenario file %s: %w", path, err)
 	}
-
 	var s Scenario
 	if err := yaml.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("failed to parse scenario file %s: %w", path, err)
@@ -26,9 +25,6 @@ func LoadFile(path string) (*Scenario, error) {
 	}
 	if len(s.Input.Messages) == 0 && len(s.Input.Payload) == 0 {
 		return nil, fmt.Errorf("scenario %s: must have either 'messages' or 'payload' in input", s.Name)
-	}
-	if err := validateScenarioDocument(path, data); err != nil {
-		return nil, err
 	}
 	return &s, nil
 }
@@ -40,7 +36,6 @@ func LoadSuite(dir string) ([]*Scenario, error) {
 		return nil, fmt.Errorf("failed to read suite directory %s: %w", dir, err)
 	}
 	var scenarios []*Scenario
-	seenNames := make(map[string]string)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -49,20 +44,10 @@ func LoadSuite(dir string) ([]*Scenario, error) {
 		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
 			continue
 		}
-		path := filepath.Join(dir, name)
-		s, err := LoadFile(path)
+		s, err := LoadFile(filepath.Join(dir, name))
 		if err != nil {
 			return nil, err
 		}
-		if firstPath, exists := seenNames[s.Name]; exists {
-			return nil, fmt.Errorf(
-				"error: duplicate scenario name %q\n  first defined:  %s:1\n  also defined:   %s:1\nfix: scenario names must be unique across the suite",
-				s.Name,
-				firstPath,
-				path,
-			)
-		}
-		seenNames[s.Name] = path
 		scenarios = append(scenarios, s)
 	}
 	if len(scenarios) == 0 {

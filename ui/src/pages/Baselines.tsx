@@ -1,28 +1,27 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getBaselines, getBaselineDiff } from '../api/client';
-import { EmptyState } from '../components/EmptyState';
-import { Loading } from '../components/Loading';
-import type { BaselineContract } from '../api/types';
+import { getBaselineDiff } from '../api/client';
 
 export function Baselines() {
   const [suite, setSuite] = useState('smoke');
-  const [activeSuite, setActiveSuite] = useState('smoke');
+  const [scenario, setScenario] = useState('');
 
-  const { data: baselines, isLoading } = useQuery({
-    queryKey: ['baselines', activeSuite],
-    queryFn: () => getBaselines(activeSuite),
+  const { data: diff, isLoading, error, refetch } = useQuery({
+    queryKey: ['baseline-diff', suite, scenario],
+    queryFn: () => getBaselineDiff(suite, scenario),
+    enabled: false,
   });
 
-  const [expandedScenario, setExpandedScenario] = useState<string | null>(null);
-
-  const handleLoad = () => setActiveSuite(suite);
+  const handleLoad = () => {
+    if (suite && scenario) {
+      refetch();
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold mb-6">Baselines</h1>
+      <h1 className="text-2xl font-bold mb-6">Baseline Diff</h1>
 
-      {/* Suite selector */}
       <div className="bg-white border rounded-lg p-4 mb-6">
         <div className="flex gap-4 items-end">
           <div>
@@ -33,119 +32,101 @@ export function Baselines() {
               onChange={(e) => setSuite(e.target.value)}
               className="border rounded px-3 py-1.5 text-sm"
               placeholder="smoke"
-              onKeyDown={(e) => e.key === 'Enter' && handleLoad()}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Scenario</label>
+            <input
+              type="text"
+              value={scenario}
+              onChange={(e) => setScenario(e.target.value)}
+              className="border rounded px-3 py-1.5 text-sm w-full"
+              placeholder="order_status_nominal"
             />
           </div>
           <button
             onClick={handleLoad}
-            className="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800"
+            disabled={!scenario}
+            className="px-4 py-1.5 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50"
           >
-            Load
+            Load Baseline
           </button>
         </div>
       </div>
 
-      {isLoading && <Loading message="Loading baselines..." />}
+      {isLoading && <p className="text-gray-500">Loading baseline...</p>}
+      {error && <p className="text-red-500">Baseline not found or error loading.</p>}
 
-      {!isLoading && (!baselines || baselines.length === 0) && (
-        <EmptyState
-          title="No baselines for this suite"
-          description={`Run \`gauntlet baseline --suite ${activeSuite}\` to generate baselines.`}
-        />
-      )}
-
-      {baselines && baselines.length > 0 && (
-        <div className="space-y-3">
-          {baselines.map((b) => (
-            <BaselineCard
-              key={b.scenario}
-              baseline={b}
-              suite={activeSuite}
-              isExpanded={expandedScenario === b.scenario}
-              onToggle={() =>
-                setExpandedScenario(expandedScenario === b.scenario ? null : b.scenario)
-              }
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BaselineCard({
-  baseline,
-  suite,
-  isExpanded,
-  onToggle,
-}: {
-  baseline: BaselineContract;
-  suite: string;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
-  const { data: detail } = useQuery({
-    queryKey: ['baseline-diff', suite, baseline.scenario],
-    queryFn: () => getBaselineDiff(suite, baseline.scenario),
-    enabled: isExpanded,
-  });
-
-  const toolSeq = baseline.tool_sequence?.required ?? [];
-  const requiredFields = baseline.output?.required_fields ?? [];
-  const forbidden = baseline.output?.forbidden_content ?? [];
-
-  return (
-    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-      <div
-        className="p-4 cursor-pointer hover:bg-gray-50 flex items-start justify-between"
-        onClick={onToggle}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-gray-400 mr-1">{isExpanded ? '\u25BC' : '\u25B6'}</span>
-            <span className="font-medium">{baseline.scenario}</span>
+      {diff && (
+        <div className="bg-white border rounded-lg shadow-sm">
+          <div className="p-4 border-b bg-gray-50">
+            <h2 className="font-bold">
+              {diff.scenario}{' '}
+              <span className="text-sm font-normal text-gray-500">({diff.suite})</span>
+            </h2>
           </div>
-
-          {/* Tool sequence */}
-          {toolSeq.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap mb-1">
-              {toolSeq.map((tool, i) => (
-                <span key={i} className="flex items-center">
-                  {i > 0 && <span className="text-gray-400 mx-1">&rarr;</span>}
-                  <code className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{tool}</code>
-                </span>
-              ))}
+          <div className="p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+                Tool Sequence
+              </h3>
+              <div className="flex gap-2">
+                {diff.tool_sequence.map((tool, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center px-2.5 py-1 rounded bg-blue-50 text-blue-700 text-sm font-mono"
+                  >
+                    {i + 1}. {tool}
+                  </span>
+                ))}
+                {diff.tool_sequence.length === 0 && (
+                  <span className="text-sm text-gray-400">No tool sequence defined</span>
+                )}
+              </div>
             </div>
-          )}
 
-          <div className="flex gap-1 flex-wrap">
-            {requiredFields.map((f) => (
-              <span key={f} className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded font-mono">{f}</span>
-            ))}
-            {forbidden.map((c) => (
-              <span key={c} className="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded">{c}</span>
-            ))}
-          </div>
-        </div>
-      </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+                Required Fields
+              </h3>
+              <div className="flex gap-2 flex-wrap">
+                {diff.required_fields.map((field) => (
+                  <span
+                    key={field}
+                    className="inline-flex items-center px-2 py-0.5 rounded bg-green-50 text-green-700 text-xs font-mono"
+                  >
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
 
-      {isExpanded && detail && (
-        <div className="px-4 pb-4 border-t bg-gray-50">
-          <div className="pt-3 space-y-3">
-            {detail.output?.schema && (
+            {diff.forbidden_content.length > 0 && (
               <div>
-                <h3 className="text-xs font-semibold text-gray-500 mb-1">Output Schema</h3>
-                <pre className="text-xs bg-white border rounded p-3 overflow-x-auto">
-                  {JSON.stringify(detail.output.schema, null, 2)}
-                </pre>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+                  Forbidden Content
+                </h3>
+                <div className="flex gap-2 flex-wrap">
+                  {diff.forbidden_content.map((content) => (
+                    <span
+                      key={content}
+                      className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-700 text-xs"
+                    >
+                      {content}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
-            {detail.recorded_at && (
-              <p className="text-xs text-gray-400">
-                Recorded: {detail.recorded_at}
-                {detail.commit && <> | Commit: <code>{detail.commit}</code></>}
-              </p>
-            )}
+
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+                Output Schema
+              </h3>
+              <pre className="text-xs bg-gray-50 rounded p-3 overflow-x-auto">
+                {JSON.stringify(diff.output_schema, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       )}

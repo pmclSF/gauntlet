@@ -1,6 +1,0 @@
-{
-  "include": ["gauntlet"],
-  "typeCheckingMode": "basic",
-  "reportMissingImports": true,
-  "reportMissingTypeStubs": false
-}

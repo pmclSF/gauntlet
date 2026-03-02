@@ -97,10 +97,6 @@ Fields NOT in denylist: preserved even if not in canonical form above.
 Unknown fields are stored in "extra": {} in canonical form.
 This prevents SDK upgrades from causing hash misses.
 
-Replay lockfile index: deterministic sorted fixture index with SHA-256 checksum.
-Path fields are normalized to forward slashes for cross-platform stability.
-Snapshot tests pin canonical hashes + lockfile index digest across OS/arch variants.
-
 ## Migration
 
 When hash_version increments:

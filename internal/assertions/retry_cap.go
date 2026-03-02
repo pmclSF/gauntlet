@@ -30,18 +30,11 @@ func (a *RetryCapAssertion) Evaluate(ctx Context) Result {
 		}
 	}
 
-	// Default retry cap is 3.
-	maxRetries := 3
-	if configured, ok := specInt(ctx.Spec, "max_retries"); ok {
-		maxRetries = configured
-	}
-	targetTool, hasTargetTool := specString(ctx.Spec, "tool")
+	// Default retry cap is 3 (configurable via spec properties)
+	defaultCap := 3
 
 	for tool, count := range maxConsecutive {
-		if hasTargetTool && targetTool != "" && tool != targetTool {
-			continue
-		}
-		if count > maxRetries {
+		if count > defaultCap {
 			docketTag := "planner.retry_storm"
 			// If the tool had a timeout/error state, use more specific tag
 			if ws, ok := ctx.WorldState.Tools[tool]; ok {
@@ -49,15 +42,15 @@ func (a *RetryCapAssertion) Evaluate(ctx Context) Result {
 					docketTag = "tool.timeout_retrycap"
 				}
 			}
-				return Result{
-					AssertionType: a.Type(),
-					Passed:        false,
-					Expected:      fmt.Sprintf("max %d consecutive calls to %s", maxRetries, tool),
-					Actual:        fmt.Sprintf("%d consecutive calls to %s", count, tool),
-					Message:       fmt.Sprintf("retry cap exceeded: %s called %d times consecutively (max %d)", tool, count, maxRetries),
-					DocketHint:    docketTag,
-				}
+			return Result{
+				AssertionType: a.Type(),
+				Passed:        false,
+				Expected:      fmt.Sprintf("max %d consecutive calls to %s", defaultCap, tool),
+				Actual:        fmt.Sprintf("%d consecutive calls to %s", count, tool),
+				Message:       fmt.Sprintf("retry cap exceeded: %s called %d times consecutively (max %d)", tool, count, defaultCap),
+				DocketHint:    docketTag,
 			}
+		}
 	}
 
 	return Result{

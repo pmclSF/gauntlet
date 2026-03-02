@@ -1,7 +1,6 @@
 package determinism
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -22,19 +21,6 @@ func CanonicalizeOutput(output interface{}) ([]byte, error) {
 	}
 	// NFC normalize unicode
 	return []byte(norm.NFC.String(string(data))), nil
-}
-
-// CanonicalizeJSON canonicalizes raw JSON bytes into deterministic JSON.
-func CanonicalizeJSON(raw []byte) ([]byte, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("failed to canonicalize output: empty JSON payload")
-	}
-	var parsed interface{}
-	if err := json.Unmarshal(trimmed, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to canonicalize output: invalid JSON: %w", err)
-	}
-	return CanonicalizeOutput(parsed)
 }
 
 func normalizeValue(v interface{}) interface{} {

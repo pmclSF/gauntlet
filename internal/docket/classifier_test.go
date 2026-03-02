@@ -3,7 +3,7 @@ package docket
 import (
 	"testing"
 
-	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/gauntlet-dev/gauntlet/internal/assertions"
 )
 
 func TestClassifyNoFailures(t *testing.T) {
@@ -81,17 +81,5 @@ func TestPrecedenceOrder(t *testing.T) {
 	// input.malformed should have higher precedence than planner.*
 	if Precedence(TagInputMalformed) >= Precedence(TagPlannerPrematureEnd) {
 		t.Error("input.malformed should have higher precedence (lower value) than planner.premature_finalize")
-	}
-}
-
-func TestFirstClassTagPrecedence(t *testing.T) {
-	if Precedence(TagFixtureMiss) >= Precedence(TagInputMalformed) {
-		t.Error("fixture.miss should have higher precedence than input.malformed")
-	}
-	if !IsFirstClassTag(TagFixtureMiss) || !IsFirstClassTag(TagFixtureIntegrity) || !IsFirstClassTag(TagTUTExitNonzero) {
-		t.Error("expected all first-class tags to be recognized")
-	}
-	if IsFirstClassTag(TagPlannerPrematureEnd) {
-		t.Error("planner tag should not be treated as first-class")
 	}
 }

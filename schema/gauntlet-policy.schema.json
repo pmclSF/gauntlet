@@ -5,60 +5,6 @@
   "description": "Schema for the gauntlet.yml policy file that configures a Gauntlet test suite.",
   "type": "object",
   "additionalProperties": false,
-  "definitions": {
-    "runner_mode": {
-      "type": "string",
-      "enum": [
-        "local",
-        "pr_ci",
-        "fork_pr",
-        "nightly"
-      ]
-    },
-    "model_mode": {
-      "type": "string",
-      "enum": [
-        "recorded",
-        "live",
-        "passthrough"
-      ]
-    },
-    "mode_legacy": {
-      "type": "string",
-      "description": "Legacy compatibility field that may hold either a runner mode or a model mode.",
-      "enum": [
-        "local",
-        "pr_ci",
-        "fork_pr",
-        "nightly",
-        "recorded",
-        "live",
-        "passthrough"
-      ]
-    },
-    "suite": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "scenarios": {
-          "type": "string"
-        },
-        "budget_ms": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "mode": {
-          "$ref": "#/definitions/mode_legacy"
-        },
-        "runner_mode": {
-          "$ref": "#/definitions/runner_mode"
-        },
-        "model_mode": {
-          "$ref": "#/definitions/model_mode"
-        }
-      }
-    }
-  },
   "properties": {
     "version": {
       "type": "integer",
@@ -82,79 +28,13 @@
           "type": "string",
           "description": "The type of agent under test (e.g. cli, api, docker)."
         },
-        "adapter": {
-          "type": "string",
-          "enum": ["cli", "http", "minimal"]
-        },
         "command": {
           "type": "string",
           "description": "Shell command used to invoke the agent."
         },
-        "args": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "work_dir": {
-          "type": "string"
-        },
         "working_dir": {
           "type": "string",
           "description": "Working directory from which the command is executed."
-        },
-        "env": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "http_port": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "http_path": {
-          "type": "string"
-        },
-        "startup_ms": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "resource_limits": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "cpu_seconds": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "CPU time limit per scenario process in seconds."
-            },
-            "memory_mb": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Address-space/data memory limit per scenario process in MiB."
-            },
-            "open_files": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Maximum open file descriptors per scenario process."
-            }
-          }
-        },
-        "guardrails": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "hostile_payload": {
-              "type": "boolean",
-              "description": "Enable linux namespace/process guardrails for hostile scenario payloads."
-            },
-            "max_processes": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Maximum child processes via RLIMIT_NPROC when hostile_payload is enabled."
-            }
-          }
         }
       }
     },
@@ -169,83 +49,8 @@
           "description": "Default time budget in milliseconds for each scenario."
         },
         "mode": {
-          "$ref": "#/definitions/mode_legacy"
-        },
-        "runner_mode": {
-          "$ref": "#/definitions/runner_mode"
-        },
-        "model_mode": {
-          "$ref": "#/definitions/model_mode"
-        }
-      }
-    },
-    "runner": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "fail_fast": {
-          "type": "boolean",
-          "description": "When true, stop the suite after the first failed or error scenario."
-        },
-        "max_artifact_bytes": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum per-scenario failure artifact size in bytes before tool trace truncation is applied (default 10485760)."
-        }
-      }
-    },
-    "suites": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/definitions/suite"
-      }
-    },
-    "assertions": {
-      "type": "object",
-      "description": "Assertion gate policy for hard vs soft runtime enforcement.",
-      "additionalProperties": false,
-      "properties": {
-        "hard_gates": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "output_schema",
-              "tool_sequence",
-              "tool_args_invariant",
-              "retry_cap",
-              "model_call_count",
-              "cost_budget",
-              "latency_p99",
-              "semantic_match",
-              "forbidden_tool",
-              "forbidden_content",
-              "pii_absent",
-              "output_derivable",
-              "sensitive_leak"
-            ]
-          }
-        },
-        "soft_signals": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "output_schema",
-              "tool_sequence",
-              "tool_args_invariant",
-              "retry_cap",
-              "model_call_count",
-              "cost_budget",
-              "latency_p99",
-              "semantic_match",
-              "forbidden_tool",
-              "forbidden_content",
-              "pii_absent",
-              "output_derivable",
-              "sensitive_leak"
-            ]
-          }
+          "type": "string",
+          "description": "Default execution mode (e.g. strict, lenient)."
         }
       }
     },
@@ -256,48 +61,6 @@
     "world_dir": {
       "type": "string",
       "description": "Path to the directory containing world definition YAML files (tools and databases)."
-    },
-    "fixtures_dir": {
-      "type": "string",
-      "description": "Path to the directory containing recorded fixtures."
-    },
-    "baselines_dir": {
-      "type": "string",
-      "description": "Path to the directory containing contract baselines."
-    },
-    "proxy": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "addr": {
-          "type": "string"
-        },
-        "mode": {
-          "$ref": "#/definitions/model_mode"
-        }
-      }
-    },
-    "redaction": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "field_paths": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "patterns": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "prompt_injection_denylist": {
-          "type": "boolean",
-          "description": "Enable default denylist detection for prompt-injection markers in recorded artifacts (default: true)."
-        }
-      }
     }
   }
 }

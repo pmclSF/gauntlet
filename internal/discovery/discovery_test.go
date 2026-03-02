@@ -3,7 +3,6 @@ package discovery
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -97,50 +96,6 @@ func TestEngine_Discover_WithDBSchemas(t *testing.T) {
 	p := proposals[0]
 	if p.Source != "db_schema" {
 		t.Errorf("proposal.Source = %q, want %q", p.Source, "db_schema")
-	}
-}
-
-func TestEngine_Discover_WithDBSeedSets(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	dbDir := filepath.Join(tmpDir, "schemas")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		t.Fatalf("mkdir schemas: %v", err)
-	}
-
-	content := `
-database: orders_db
-seed_sets:
-  standard_order:
-    tables: {}
-  conflicting_state:
-    tables: {}
-`
-	if err := os.WriteFile(filepath.Join(dbDir, "orders_db.yaml"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write db schema: %v", err)
-	}
-
-	engine := NewEngine(DiscoveryConfig{
-		RootDir:     tmpDir,
-		DBSchemaDir: "schemas",
-	})
-	proposals, err := engine.Discover()
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(proposals) != 2 {
-		t.Fatalf("expected 2 seed-set proposals, got %d", len(proposals))
-	}
-
-	found := map[string]bool{}
-	for _, p := range proposals {
-		if p.Database != "orders_db" {
-			t.Fatalf("Database = %q, want orders_db", p.Database)
-		}
-		found[p.SeedSet] = true
-	}
-	if !found["standard_order"] || !found["conflicting_state"] {
-		t.Fatalf("missing expected seed-set proposals: %#v", proposals)
 	}
 }
 
@@ -261,18 +216,6 @@ func TestSaveAndLoadProposals_RoundTrip(t *testing.T) {
 			t.Errorf("proposal[%d].Description = %q, want %q", i, loaded[i].Description, original[i].Description)
 		}
 	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read saved proposals: %v", err)
-	}
-	text := string(raw)
-	if !strings.Contains(text, "version: 1") {
-		t.Fatalf("saved proposals should include version header, got:\n%s", text)
-	}
-	if !strings.Contains(text, "proposals:") {
-		t.Fatalf("saved proposals should include proposals envelope, got:\n%s", text)
-	}
 }
 
 func TestLoadProposals_FileNotFound(t *testing.T) {
@@ -297,102 +240,6 @@ func TestSaveProposals_EmptyList(t *testing.T) {
 
 	if len(loaded) != 0 {
 		t.Errorf("expected 0 proposals, got %d", len(loaded))
-	}
-}
-
-func TestLoadProposals_LegacyTopLevelList(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "legacy.yaml")
-	content := `
-- id: disc-order_lookup-nominal
-  name: order_lookup_nominal
-  description: Auto-discovered order lookup
-  tool: order_lookup
-  variant: nominal
-  tags: [auto-discovered]
-  status: pending
-  source: tool_definition
-`
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write legacy file: %v", err)
-	}
-
-	loaded, err := LoadProposals(path)
-	if err != nil {
-		t.Fatalf("LoadProposals legacy format: %v", err)
-	}
-	if len(loaded) != 1 {
-		t.Fatalf("loaded %d proposals, want 1", len(loaded))
-	}
-	if loaded[0].ID != "disc-order_lookup-nominal" {
-		t.Fatalf("loaded[0].ID = %q", loaded[0].ID)
-	}
-}
-
-func TestSaveProposals_InvalidStatus(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "invalid.yaml")
-	proposals := []Proposal{
-		{
-			ID:          "disc-1",
-			Name:        "bad_proposal",
-			Description: "invalid status",
-			Tool:        "order_lookup",
-			Variant:     "nominal",
-			Status:      "queued",
-			Source:      "tool_definition",
-		},
-	}
-	err := SaveProposals(proposals, path)
-	if err == nil {
-		t.Fatal("expected validation error for invalid status")
-	}
-	if !strings.Contains(err.Error(), "status") {
-		t.Fatalf("expected status validation error, got %v", err)
-	}
-}
-
-func TestSaveProposals_InvalidToolVariantDependency(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "invalid_dependency.yaml")
-	proposals := []Proposal{
-		{
-			ID:          "disc-2",
-			Name:        "missing_variant",
-			Description: "tool must include variant",
-			Tool:        "order_lookup",
-			Status:      "pending",
-			Source:      "tool_definition",
-		},
-	}
-	err := SaveProposals(proposals, path)
-	if err == nil {
-		t.Fatal("expected validation error for missing variant")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "variant") {
-		t.Fatalf("expected tool/variant dependency error, got %v", err)
-	}
-}
-
-func TestSaveProposals_InvalidSeedSetWithoutDatabase(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "invalid_db_dependency.yaml")
-	proposals := []Proposal{
-		{
-			ID:          "disc-db",
-			Name:        "missing_database",
-			Description: "seed_set requires database",
-			SeedSet:     "standard_order",
-			Status:      "pending",
-			Source:      "db_schema",
-		},
-	}
-	err := SaveProposals(proposals, path)
-	if err == nil {
-		t.Fatal("expected validation error for missing database")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "database") {
-		t.Fatalf("expected seed_set/database dependency error, got %v", err)
 	}
 }
 

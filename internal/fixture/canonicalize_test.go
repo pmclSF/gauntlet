@@ -3,7 +3,7 @@ package fixture
 import (
 	"testing"
 
-	"github.com/pmclSF/gauntlet/internal/proxy/providers"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
 )
 
 func TestCanonicalizeRequest(t *testing.T) {
@@ -44,10 +44,8 @@ func TestCanonicalizeRequest(t *testing.T) {
 
 func TestCanonicalizeToolCall(t *testing.T) {
 	args := map[string]interface{}{
-		"order_id":   "ord-001",
-		"created_at": "2025-01-01T00:00:00Z",
-		"request_id": "req-123",
-		"extra":      "data",
+		"order_id": "ord-001",
+		"extra":    "data",
 	}
 
 	canonical, err := CanonicalizeToolCall("order_lookup", args)
@@ -66,16 +64,6 @@ func TestCanonicalizeToolCall(t *testing.T) {
 	}
 	if string(canonical) != string(canonical2) {
 		t.Error("tool call canonicalization should be deterministic")
-	}
-	s := string(canonical)
-	if contains(s, "req-123") {
-		t.Error("tool canonicalization should strip request_id")
-	}
-	if !contains(s, "ord-001") {
-		t.Error("tool canonicalization should preserve order_id")
-	}
-	if !contains(s, "2025-01-01T00:00:00Z") {
-		t.Error("tool canonicalization should preserve created_at")
 	}
 }
 
@@ -148,33 +136,6 @@ func TestShouldStripField(t *testing.T) {
 	}
 	if shouldStripField("new_sdk_field") {
 		t.Error("unknown field should NOT be stripped (denylist, not allowlist)")
-	}
-}
-
-func TestShouldStripToolField(t *testing.T) {
-	if !shouldStripToolField("request_id") {
-		t.Error("request_id should be stripped for tool args")
-	}
-	if !shouldStripToolField("timestamp") {
-		t.Error("timestamp should be stripped for tool args")
-	}
-	if !shouldStripToolField("trace_id") {
-		t.Error("trace_id should be stripped for tool args")
-	}
-	if !shouldStripToolField("session_id") {
-		t.Error("session_id should be stripped for tool args")
-	}
-	if !shouldStripToolField("metadata.trace") {
-		t.Error("metadata.* should be stripped for tool args")
-	}
-	if !shouldStripToolField("extra_headers.auth") {
-		t.Error("extra_headers.* should be stripped for tool args")
-	}
-	if shouldStripToolField("order_id") {
-		t.Error("order_id should NOT be stripped for tool args")
-	}
-	if shouldStripToolField("created_at") {
-		t.Error("created_at should NOT be stripped for tool args")
 	}
 }
 

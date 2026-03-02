@@ -165,55 +165,39 @@ func printDBSnippet(framework string) {
 	}
 }
 
-// DetectFramework attempts to detect the Python agent framework used in the project.
+// DetectFramework attempts to detect the Python framework used in the project.
 func DetectFramework(projectDir string) string {
-	// Check requirements.txt and pyproject.toml for framework dependencies.
-	// Order matters: more specific frameworks first.
-	depFiles := []string{
-		filepath.Join(projectDir, "requirements.txt"),
-		filepath.Join(projectDir, "pyproject.toml"),
-	}
-	// Ordered from most specific to least specific
-	frameworkPatterns := []struct {
-		pattern string
-		name    string
-	}{
-		{"pydantic-ai", "pydantic-ai"},
-		{"pydantic_ai", "pydantic-ai"},
-		{"openai-agents", "openai-agents"},
-		{"crewai", "crewai"},
-		{"autogen", "autogen"},
-		{"fastapi", "fastapi"},
-		{"flask", "flask"},
-		{"langchain", "langchain"},
+	// Check requirements.txt
+	reqPath := filepath.Join(projectDir, "requirements.txt")
+	if data, err := os.ReadFile(reqPath); err == nil {
+		content := strings.ToLower(string(data))
+		if strings.Contains(content, "fastapi") {
+			return "fastapi"
+		}
+		if strings.Contains(content, "flask") {
+			return "flask"
+		}
+		if strings.Contains(content, "langchain") {
+			return "langchain"
+		}
 	}
 
-	for _, depFile := range depFiles {
-		data, err := os.ReadFile(depFile)
-		if err != nil {
-			continue
-		}
+	// Check pyproject.toml
+	pyprojectPath := filepath.Join(projectDir, "pyproject.toml")
+	if data, err := os.ReadFile(pyprojectPath); err == nil {
 		content := strings.ToLower(string(data))
-		for _, fp := range frameworkPatterns {
-			if strings.Contains(content, fp.pattern) {
-				return fp.name
-			}
+		if strings.Contains(content, "fastapi") {
+			return "fastapi"
+		}
+		if strings.Contains(content, "flask") {
+			return "flask"
+		}
+		if strings.Contains(content, "langchain") {
+			return "langchain"
 		}
 	}
 
 	return "generic"
-}
-
-// DetectEntryPoint looks for common agent entry point files.
-func DetectEntryPoint(projectDir string) string {
-	candidates := []string{"main.py", "app.py", "agent.py", "run.py"}
-	for _, name := range candidates {
-		path := filepath.Join(projectDir, name)
-		if _, err := os.Stat(path); err == nil {
-			return name
-		}
-	}
-	return ""
 }
 
 const workflowTemplate = `name: Gauntlet
@@ -227,67 +211,34 @@ jobs:
   gauntlet:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.22'
 
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Gauntlet
         run: |
-          go install github.com/pmclSF/gauntlet/cmd/gauntlet@latest
+          go install github.com/gauntlet-dev/gauntlet/cmd/gauntlet@latest
 
       - name: Install Python dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
           pip install gauntlet-sdk
 
-      - name: Fetch PR base ref
-        if: github.event_name == 'pull_request'
-        run: git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}"
-
-      - name: Enforce baseline approval policy
-        if: github.event_name == 'pull_request'
-        run: |
-          gauntlet check-baseline-approval \
-            --base-ref "origin/${{ github.base_ref }}" \
-            --head-ref "HEAD" \
-            --baseline-dir "evals/baselines" \
-            --required-label "gauntlet/baseline-approved"
-
       - name: Run Gauntlet smoke suite
-        run: |
-          if ! command -v unshare >/dev/null 2>&1; then
-            echo "unshare is required for hermetic pr_ci mode egress isolation" >&2
-            exit 1
-          fi
-          unshare --net /bin/sh -lc 'ip link set lo up 2>/dev/null; gauntlet run --suite smoke --mode pr_ci'
+        run: gauntlet run --suite smoke --mode pr_ci
         env:
           GAUNTLET_MODEL_MODE: recorded
 
-      - name: Scan artifacts for sensitive content
-        id: scan_artifacts
-        if: always()
-        run: gauntlet scan-artifacts --dir evals
-
-      - name: Sign evidence bundle
-        id: sign_artifacts
-        if: always()
-        continue-on-error: true
-        run: gauntlet sign-artifacts --dir evals/runs
-
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: gauntlet-results
           path: evals/runs/
@@ -307,9 +258,6 @@ suites:
     budget_ms: 900000  # 15 minutes
     mode: nightly
 
-runner:
-  fail_fast: false   # set true to stop on first failure
-
 assertions:
   hard_gates:
     - output_schema
@@ -322,29 +270,10 @@ assertions:
     - sensitive_leak
     - output_derivable
 
-tut:
-  adapter: cli          # cli | http | minimal
-  command: python3
-  args: [main.py]
-  # work_dir: .         # defaults to project root
-  # http_port: 8000     # for http adapter
-  # http_path: /run     # for http adapter
-  # startup_ms: 5000    # for http adapter
-  # resource_limits:    # per-scenario process limits
-  #   cpu_seconds: 10
-  #   memory_mb: 512
-  #   open_files: 1024
-  # guardrails:         # linux-only hostile-payload hardening
-  #   hostile_payload: true
-  #   max_processes: 64
-
 proxy:
-  addr: "localhost:0"
+  addr: "localhost:7431"
 
 redaction:
-  # default true: detect prompt-injection marker strings in recorded artifacts.
-  # set false only if your suite intentionally stores adversarial prompt text.
-  # prompt_injection_denylist: true
   field_paths:
     - "**.api_key"
     - "**.password"

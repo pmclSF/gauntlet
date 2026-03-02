@@ -22,11 +22,11 @@ jobs:
 
       - name: Install Gauntlet
         run: |
-          go install github.com/pmclSF/gauntlet/cmd/gauntlet@latest
+          go install github.com/gauntlet-dev/gauntlet/cmd/gauntlet@latest
 
       - name: Install Python dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
           pip install gauntlet-sdk
 
       - name: Run Gauntlet smoke suite

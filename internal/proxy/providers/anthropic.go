@@ -152,15 +152,3 @@ func (n *AnthropicNormalizer) Normalize(hostname, path string, headers map[strin
 func (n *AnthropicNormalizer) DenormalizeResponse(canonical []byte, providerFamily string) ([]byte, error) {
 	return canonical, nil
 }
-
-func (n *AnthropicNormalizer) ExtractUsage(response []byte) (promptTokens int, completionTokens int) {
-	return extractUsageTokens(
-		response,
-		[][]string{{"usage", "input_tokens"}, {"usage", "prompt_tokens"}},
-		[][]string{{"usage", "output_tokens"}, {"usage", "completion_tokens"}},
-	)
-}
-
-func (n *AnthropicNormalizer) NormalizeResponseForFixture(response []byte) ([]byte, error) {
-	return response, nil
-}

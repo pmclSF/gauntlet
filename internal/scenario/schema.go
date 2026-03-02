@@ -25,8 +25,8 @@ type Input struct {
 
 // Message is an OpenAI-format chat message.
 type Message struct {
-	Role    string      `yaml:"role"    json:"role"`
-	Content interface{} `yaml:"content" json:"content"`
+	Role    string `yaml:"role"    json:"role"`
+	Content string `yaml:"content" json:"content"`
 }
 
 // WorldSpec defines the frozen world state for a scenario.

@@ -12,10 +12,6 @@ suites:
     budget_ms: 900000  # 15 minutes
     mode: nightly
 
-runner:
-  fail_fast: false           # set true to stop on first failure
-  max_artifact_bytes: 10485760  # 10MB per-scenario artifact cap (tool trace truncates first)
-
 assertions:
   hard_gates:
     - output_schema
@@ -28,29 +24,10 @@ assertions:
     - sensitive_leak
     - output_derivable
 
-tut:
-  adapter: cli          # cli | http | minimal
-  command: python3
-  args: [main.py]
-  # work_dir: .         # defaults to project root
-  # http_port: 8000     # for http adapter
-  # http_path: /run     # for http adapter
-  # startup_ms: 5000    # for http adapter
-  # resource_limits:    # per-scenario process limits
-  #   cpu_seconds: 10
-  #   memory_mb: 512
-  #   open_files: 1024
-  # guardrails:         # linux-only hostile-payload hardening
-  #   hostile_payload: true
-  #   max_processes: 64
-
 proxy:
-  addr: "localhost:0"
+  addr: "localhost:7431"
 
 redaction:
-  # default true: detect prompt-injection marker strings in recorded artifacts.
-  # set false only if your suite intentionally stores adversarial prompt text.
-  # prompt_injection_denylist: true
   field_paths:
     - "**.api_key"
     - "**.password"
