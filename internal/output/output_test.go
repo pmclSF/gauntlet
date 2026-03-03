@@ -125,6 +125,44 @@ func TestWriteResults_CreatesDirectory(t *testing.T) {
 	}
 }
 
+func TestWriteResults_RedactsSensitiveData(t *testing.T) {
+	dir := t.TempDir()
+	result := &RunResult{
+		Version: "1.0",
+		Suite:   "redaction",
+		Summary: Summary{Total: 1, Failed: 1},
+		Scenarios: []ScenarioResult{
+			{
+				Name:   "leak",
+				Status: "failed",
+				Assertions: []assertions.Result{
+					{
+						AssertionType: "sensitive_leak",
+						Passed:        false,
+						Message:       "found card 4111 1111 1111 1111 and ssn 123-45-6789",
+					},
+				},
+			},
+		},
+	}
+
+	if err := WriteResults(dir, result); err != nil {
+		t.Fatalf("WriteResults failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "results.json"))
+	if err != nil {
+		t.Fatalf("failed to read results.json: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "4111 1111 1111 1111") || strings.Contains(content, "123-45-6789") {
+		t.Fatalf("sensitive data was not redacted in results.json: %s", content)
+	}
+	if !strings.Contains(content, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in results.json, got: %s", content)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GenerateMarkdown — produces non-empty output
 // ---------------------------------------------------------------------------
@@ -507,5 +545,89 @@ func TestWriteSummary_CreatesFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "summary_test") {
 		t.Error("summary.md does not contain suite name")
+	}
+}
+
+func TestWriteSummary_RedactsSensitiveData(t *testing.T) {
+	dir := t.TempDir()
+	r := &RunResult{
+		Suite: "summary_redaction",
+		Summary: Summary{
+			Total:  1,
+			Failed: 1,
+		},
+		Scenarios: []ScenarioResult{
+			{
+				Name:   "failed_case",
+				Status: "failed",
+				Assertions: []assertions.Result{
+					{
+						AssertionType: "output_schema",
+						Passed:        false,
+						Message:       "returned ssn 123-45-6789",
+					},
+				},
+			},
+		},
+	}
+
+	if err := WriteSummary(dir, r); err != nil {
+		t.Fatalf("WriteSummary failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "summary.md"))
+	if err != nil {
+		t.Fatalf("failed to read summary.md: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "123-45-6789") {
+		t.Fatalf("sensitive data was not redacted in summary.md: %s", content)
+	}
+	if !strings.Contains(content, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in summary.md, got: %s", content)
+	}
+}
+
+func TestWriteArtifactBundle_RedactsSensitiveData(t *testing.T) {
+	runDir := t.TempDir()
+	sr := ScenarioResult{
+		Name:   "artifact_redaction",
+		Status: "failed",
+		Assertions: []assertions.Result{
+			{
+				AssertionType: "output_derivable",
+				Passed:        false,
+				Message:       "credit card 4111-1111-1111-1111 leaked",
+			},
+		},
+	}
+
+	input := map[string]interface{}{
+		"api_key": "top-secret",
+		"note":    "card 4111-1111-1111-1111",
+	}
+	if err := WriteArtifactBundle(runDir, "artifact_redaction", sr, input, nil, nil, nil, nil); err != nil {
+		t.Fatalf("WriteArtifactBundle failed: %v", err)
+	}
+
+	inputData, err := os.ReadFile(filepath.Join(runDir, "artifact_redaction", "input.json"))
+	if err != nil {
+		t.Fatalf("failed to read input.json: %v", err)
+	}
+	inputContent := string(inputData)
+	if strings.Contains(inputContent, "top-secret") || strings.Contains(inputContent, "4111-1111-1111-1111") {
+		t.Fatalf("sensitive data was not redacted in input.json: %s", inputContent)
+	}
+	if !strings.Contains(inputContent, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in input.json, got: %s", inputContent)
+	}
+
+	summaryData, err := os.ReadFile(filepath.Join(runDir, "artifact_redaction", "summary.md"))
+	if err != nil {
+		t.Fatalf("failed to read artifact summary.md: %v", err)
+	}
+	summaryContent := string(summaryData)
+	if strings.Contains(summaryContent, "4111-1111-1111-1111") {
+		t.Fatalf("sensitive data was not redacted in artifact summary.md: %s", summaryContent)
 	}
 }

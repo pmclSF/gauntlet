@@ -24,14 +24,16 @@ const (
 
 // Config holds configuration for starting a TUT.
 type Config struct {
-	Command    string            `yaml:"command" json:"command"`
-	Args       []string          `yaml:"args" json:"args"`
-	WorkDir    string            `yaml:"work_dir" json:"work_dir"`
-	Env        map[string]string `yaml:"env" json:"env"`
-	Adapter    string            `yaml:"adapter" json:"adapter"` // "http", "cli", "minimal"
-	HTTPPort   int               `yaml:"http_port" json:"http_port"`
-	HTTPPath   string            `yaml:"http_path" json:"http_path"`
-	StartupMs  int               `yaml:"startup_ms" json:"startup_ms"`
+	Command            string            `yaml:"command" json:"command"`
+	Args               []string          `yaml:"args" json:"args"`
+	WorkDir            string            `yaml:"work_dir" json:"work_dir"`
+	Env                map[string]string `yaml:"env" json:"env"`
+	Adapter            string            `yaml:"adapter" json:"adapter"` // "http", "cli", "minimal"
+	HTTPPort           int               `yaml:"http_port" json:"http_port"`
+	HTTPPath           string            `yaml:"http_path" json:"http_path"`
+	StartupMs          int               `yaml:"startup_ms" json:"startup_ms"`
+	BlockNetworkEgress bool              `yaml:"block_network_egress" json:"block_network_egress"`
+	RestrictHostEnv    bool              `yaml:"restrict_host_env" json:"restrict_host_env"`
 }
 
 // Adapter starts and manages a TUT process.
@@ -63,13 +65,13 @@ type AgentOutput struct {
 
 // TraceEvent is a structured event from TUT execution.
 type TraceEvent struct {
-	EventType  string           `json:"event_type"` // "tool_call", "model_call"
-	ToolName   string           `json:"tool_name,omitempty"`
-	Args       json.RawMessage  `json:"args,omitempty"`
-	Response   json.RawMessage  `json:"response,omitempty"`
-	ModelCall  *ModelCallEvent  `json:"model_call,omitempty"`
-	Timestamp  time.Time        `json:"timestamp"`
-	DurationMs int              `json:"duration_ms"`
+	EventType  string          `json:"event_type"` // "tool_call", "model_call"
+	ToolName   string          `json:"tool_name,omitempty"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Response   json.RawMessage `json:"response,omitempty"`
+	ModelCall  *ModelCallEvent `json:"model_call,omitempty"`
+	Timestamp  time.Time       `json:"timestamp"`
+	DurationMs int             `json:"duration_ms"`
 }
 
 // ModelCallEvent records details of a model API call.

@@ -1,7 +1,9 @@
 package world
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,6 +184,30 @@ func TestValidateVariantPolicy_AllNonNominalChaos(t *testing.T) {
 	}
 	if err := ValidateVariantPolicy(tools, true); err != nil {
 		t.Errorf("all non-nominal with chaos=true should pass: %v", err)
+	}
+}
+
+func TestValidateVariantPolicy_MultiFaultChaosLogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	}()
+
+	tools := map[string]string{
+		"order_lookup":     "timeout",
+		"refund_processor": "server_error",
+	}
+	if err := ValidateVariantPolicy(tools, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msg := buf.String()
+	if !strings.Contains(msg, "chaos=true with multi-fault scenario") {
+		t.Fatalf("expected warning log, got: %q", msg)
 	}
 }
 

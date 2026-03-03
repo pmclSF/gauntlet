@@ -10,8 +10,10 @@ import (
 	"github.com/gauntlet-dev/gauntlet/internal/api"
 	"github.com/gauntlet-dev/gauntlet/internal/ci"
 	"github.com/gauntlet-dev/gauntlet/internal/discovery"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy"
 	"github.com/gauntlet-dev/gauntlet/internal/redaction"
 	"github.com/gauntlet-dev/gauntlet/internal/runner"
+	"github.com/gauntlet-dev/gauntlet/internal/tut"
 )
 
 var version = "0.1.0"
@@ -47,6 +49,8 @@ func newRunCmd() *cobra.Command {
 		configPath     string
 		scenarioFilter string
 		mode           string
+		modelMode      string
+		proxyAddr      string
 		dryRun         bool
 		outputDir      string
 		budgetMs       int64
@@ -56,8 +60,19 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run a scenario suite",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolved, err := loadPolicyIfPresent(configPath, suite, cmd.Flags().Changed("config"))
+			if err != nil {
+				return err
+			}
+
+			if mode == "" && resolved != nil && resolved.RunnerMode != "" {
+				mode = resolved.RunnerMode
+			}
 			if mode == "" {
 				mode = ci.DetectMode()
+			}
+			if !cmd.Flags().Changed("budget") && resolved != nil && resolved.BudgetMs > 0 {
+				budgetMs = resolved.BudgetMs
 			}
 
 			cfg := runner.Config{
@@ -69,8 +84,26 @@ func newRunCmd() *cobra.Command {
 				BudgetMs:       budgetMs,
 				ScenarioFilter: scenarioFilter,
 			}
+			applyResolvedPolicy(&cfg, resolved, configPath)
+
+			var adapter tut.Adapter
+			if cfg.TUTConfig.Command != "" {
+				adapter = selectAdapter(cfg.TUTConfig)
+			}
+
+			var p *proxy.Proxy
+			if !cfg.DryRun && adapter != nil {
+				p, err = startProxyForRun(&cfg, resolved, modelMode, proxyAddr)
+				if err != nil {
+					return err
+				}
+				if p != nil {
+					defer func() { _ = p.Stop() }()
+				}
+			}
 
 			r := runner.NewRunner(cfg)
+			r.Adapter = adapter
 			result, err := r.Run(context.Background())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
@@ -111,6 +144,8 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "evals/gauntlet.yml", "Path to policy file")
 	cmd.Flags().StringVar(&scenarioFilter, "scenario", "", "Run a single scenario by name")
 	cmd.Flags().StringVar(&mode, "mode", "", "Execution mode (pr_ci, nightly, local, fork_pr)")
+	cmd.Flags().StringVar(&modelMode, "model-mode", "", "Model replay mode (recorded, live, passthrough)")
+	cmd.Flags().StringVar(&proxyAddr, "proxy-addr", "", "Proxy listen address override")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate scenarios without executing")
 	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Output directory for artifacts")
 	cmd.Flags().Int64Var(&budgetMs, "budget", 300000, "Wall-clock budget in milliseconds")

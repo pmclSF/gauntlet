@@ -16,6 +16,7 @@ func LoadFile(path string) (*Scenario, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read scenario file %s: %w", path, err)
 	}
+
 	var s Scenario
 	if err := yaml.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("failed to parse scenario file %s: %w", path, err)
@@ -25,6 +26,9 @@ func LoadFile(path string) (*Scenario, error) {
 	}
 	if len(s.Input.Messages) == 0 && len(s.Input.Payload) == 0 {
 		return nil, fmt.Errorf("scenario %s: must have either 'messages' or 'payload' in input", s.Name)
+	}
+	if err := validateScenarioDocument(path, data); err != nil {
+		return nil, err
 	}
 	return &s, nil
 }

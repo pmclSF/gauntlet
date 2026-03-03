@@ -1,0 +1,23 @@
+scenario: weather_retry_timeout
+description: "get_weather times out — agent should handle gracefully without infinite retries"
+tags:
+  - smoke
+  - fault-injection
+
+input:
+  messages:
+    - role: user
+      content: "What's the weather in London?"
+
+world:
+  tools:
+    get_weather: timeout
+
+assertions:
+  - type: retry_cap
+    tool: get_weather
+    max_retries: 3
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response"]

@@ -1,0 +1,28 @@
+scenario: weather_query_nominal
+description: "Happy path — user asks for weather in Tokyo, agent calls get_weather and responds"
+tags:
+  - smoke
+  - happy-path
+
+input:
+  messages:
+    - role: user
+      content: "What's the weather in Tokyo?"
+
+world:
+  tools:
+    get_weather: nominal
+
+assertions:
+  - type: tool_sequence
+    required: ["get_weather"]
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response"]
+      properties:
+        response:
+          type: string
+  - type: tool_args_invariant
+    tool: get_weather
+    invariant: "args.city is not null"

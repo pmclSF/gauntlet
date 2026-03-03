@@ -29,11 +29,12 @@ world:
       seed_sets:
         - default_orders
 assertions:
-  - type: tool_called
-    tool: refund_processor
-  - type: json_match
-    path: $.status
-    value: refunded
+  - type: tool_sequence
+    required:
+      - refund_processor
+  - type: output_schema
+    schema:
+      type: object
 chaos: false
 tags:
   - refund
@@ -77,11 +78,11 @@ beta_reason: requires tool chaining
 	if len(s.Assertions) != 2 {
 		t.Fatalf("expected 2 assertions, got %d", len(s.Assertions))
 	}
-	if s.Assertions[0].Type != "tool_called" {
-		t.Errorf("Assertions[0].Type = %q, want %q", s.Assertions[0].Type, "tool_called")
+	if s.Assertions[0].Type != "tool_sequence" {
+		t.Errorf("Assertions[0].Type = %q, want %q", s.Assertions[0].Type, "tool_sequence")
 	}
-	if s.Assertions[1].Type != "json_match" {
-		t.Errorf("Assertions[1].Type = %q, want %q", s.Assertions[1].Type, "json_match")
+	if s.Assertions[1].Type != "output_schema" {
+		t.Errorf("Assertions[1].Type = %q, want %q", s.Assertions[1].Type, "output_schema")
 	}
 	if s.Chaos {
 		t.Error("Chaos should be false")
@@ -108,7 +109,7 @@ input:
 world:
   tools: {}
 assertions:
-  - type: status_ok
+  - type: sensitive_leak
 `
 	var s Scenario
 	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
@@ -142,10 +143,9 @@ input:
 world:
   tools: {}
 assertions:
-  - type: json_match
-    path: $.result
-    value: ok
-    exact: true
+  - type: tool_args_invariant
+    tool: lookup_order
+    invariant: "args.order_id == input.order_id"
 `
 	var s Scenario
 	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
@@ -155,17 +155,14 @@ assertions:
 		t.Fatalf("expected 1 assertion, got %d", len(s.Assertions))
 	}
 	a := s.Assertions[0]
-	if a.Type != "json_match" {
+	if a.Type != "tool_args_invariant" {
 		t.Errorf("Type = %q", a.Type)
 	}
-	if a.Raw["path"] != "$.result" {
-		t.Errorf("Raw[path] = %v", a.Raw["path"])
+	if a.Raw["tool"] != "lookup_order" {
+		t.Errorf("Raw[tool] = %v", a.Raw["tool"])
 	}
-	if a.Raw["value"] != "ok" {
-		t.Errorf("Raw[value] = %v", a.Raw["value"])
-	}
-	if a.Raw["exact"] != true {
-		t.Errorf("Raw[exact] = %v", a.Raw["exact"])
+	if a.Raw["invariant"] != "args.order_id == input.order_id" {
+		t.Errorf("Raw[invariant] = %v", a.Raw["invariant"])
 	}
 }
 
@@ -219,8 +216,9 @@ world:
   tools:
     echo: nominal
 assertions:
-  - type: contains
-    text: pong
+  - type: output_schema
+    schema:
+      type: object
 `
 	path := writeTemp(t, dir, "test.yaml", yaml)
 	s, err := LoadFile(path)
@@ -310,6 +308,49 @@ input:
 	}
 	if s.Input.Payload["key"] != "value" {
 		t.Errorf("Payload[key] = %v", s.Input.Payload["key"])
+	}
+}
+
+func TestLoadFile_InvalidAssertionType(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+scenario: invalid_assertion_type
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: totally_unknown_assertion
+`
+	path := writeTemp(t, dir, "invalid_assertion.yaml", yaml)
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("expected schema validation error for unknown assertion type")
+	}
+	if got := err.Error(); !contains(got, "schema validation failed") {
+		t.Fatalf("unexpected error: %s", got)
+	}
+}
+
+func TestLoadFile_MissingRequiredAssertionField(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+scenario: invalid_assertion_shape
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: tool_args_invariant
+    tool: order_lookup
+`
+	path := writeTemp(t, dir, "invalid_assertion_shape.yaml", yaml)
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("expected schema validation error for missing assertion field")
+	}
+	if got := err.Error(); !contains(got, "schema validation failed") {
+		t.Fatalf("unexpected error: %s", got)
 	}
 }
 

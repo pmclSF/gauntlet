@@ -14,10 +14,24 @@ import (
 type EgressStatus int
 
 const (
-	EgressBlocked     EgressStatus = iota // Network is blocked
-	EgressOpen                            // Network is accessible
-	EgressUnknown                         // Could not determine
+	EgressBlocked EgressStatus = iota // Network is blocked
+	EgressOpen                        // Network is accessible
+	EgressUnknown                     // Could not determine
 )
+
+// checkEgressBlockedFn is overridden in tests to make mode enforcement deterministic.
+var checkEgressBlockedFn = CheckEgressBlocked
+
+func (s EgressStatus) String() string {
+	switch s {
+	case EgressBlocked:
+		return "blocked"
+	case EgressOpen:
+		return "open"
+	default:
+		return "unknown"
+	}
+}
 
 // InCIContext returns true if running in a CI environment.
 func InCIContext() bool {

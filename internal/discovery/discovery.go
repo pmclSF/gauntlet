@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -28,6 +29,7 @@ type Proposal struct {
 type DiscoveryConfig struct {
 	RootDir      string   `yaml:"root_dir"`
 	ToolDirs     []string `yaml:"tool_dirs"`
+	PythonDirs   []string `yaml:"python_dirs"`
 	DBSchemaDir  string   `yaml:"db_schema_dir"`
 	TraceDir     string   `yaml:"trace_dir"`
 	ExcludeTools []string `yaml:"exclude_tools"`
@@ -61,7 +63,103 @@ func (e *Engine) Discover() ([]Proposal, error) {
 	}
 	proposals = append(proposals, dbProposals...)
 
-	return proposals, nil
+	// Discover from Python @gauntlet.tool decorators
+	pythonProposals, err := e.discoverFromPythonTools()
+	if err != nil {
+		return nil, fmt.Errorf("python tool discovery failed: %w", err)
+	}
+	proposals = append(proposals, pythonProposals...)
+
+	// Merge by (tool, variant) to avoid duplicate nominal proposals coming from
+	// both Python AST discovery and world/tool YAML definitions.
+	merged := make(map[string]Proposal, len(proposals))
+	for _, p := range proposals {
+		key := p.Tool + "|" + p.Variant
+		if existing, ok := merged[key]; ok {
+			// Prefer sources with richer scenario context.
+			if proposalSourcePriority(p.Source) > proposalSourcePriority(existing.Source) {
+				p.Tags = mergeTags(existing.Tags, p.Tags)
+				p.Source = mergeSources(existing.Source, p.Source)
+				merged[key] = p
+			} else {
+				existing.Tags = mergeTags(existing.Tags, p.Tags)
+				existing.Source = mergeSources(existing.Source, p.Source)
+				merged[key] = existing
+			}
+			continue
+		}
+		merged[key] = p
+	}
+
+	var deduped []Proposal
+	for _, p := range merged {
+		deduped = append(deduped, p)
+	}
+	sort.SliceStable(deduped, func(i, j int) bool {
+		if deduped[i].Tool != deduped[j].Tool {
+			return deduped[i].Tool < deduped[j].Tool
+		}
+		return deduped[i].Variant < deduped[j].Variant
+	})
+	return deduped, nil
+}
+
+func proposalSourcePriority(source string) int {
+	parts := strings.Split(source, "+")
+	best := 0
+	for _, part := range parts {
+		switch strings.TrimSpace(part) {
+		case "tool_definition":
+			if best < 3 {
+				best = 3
+			}
+		case "python_tool_ast":
+			if best < 2 {
+				best = 2
+			}
+		case "db_schema":
+			if best < 1 {
+				best = 1
+			}
+		}
+	}
+	return best
+}
+
+func mergeTags(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	var out []string
+	for _, tag := range a {
+		if seen[tag] || tag == "" {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	for _, tag := range b {
+		if seen[tag] || tag == "" {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func mergeSources(a, b string) string {
+	seen := map[string]bool{}
+	var parts []string
+	for _, source := range strings.Split(a+"+"+b, "+") {
+		s := strings.TrimSpace(source)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		parts = append(parts, s)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "+")
 }
 
 func (e *Engine) discoverFromTools() ([]Proposal, error) {
@@ -102,7 +200,7 @@ func (e *Engine) discoverFromTools() ([]Proposal, error) {
 					Variant:     variant,
 					Tags:        []string{"auto-discovered", "tool-variant"},
 					Status:      "pending",
-					Source:       "tool_definition",
+					Source:      "tool_definition",
 				})
 			}
 		}
@@ -139,7 +237,7 @@ func (e *Engine) discoverFromDB() ([]Proposal, error) {
 			Description: fmt.Sprintf("Auto-discovered: test with %s database seed", dbName),
 			Tags:        []string{"auto-discovered", "db-seed"},
 			Status:      "pending",
-			Source:       "db_schema",
+			Source:      "db_schema",
 		})
 	}
 

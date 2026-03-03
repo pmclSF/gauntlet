@@ -2,13 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gauntlet.dev/schema/scenario.schema.json",
   "title": "Gauntlet Scenario",
-  "description": "Schema for Gauntlet scenario YAML files that define test scenarios for AI agent evaluation.",
+  "description": "Schema for Gauntlet scenario YAML files.",
   "type": "object",
-  "required": ["scenario"],
+  "required": ["scenario", "input"],
   "additionalProperties": false,
   "properties": {
     "scenario": {
       "type": "string",
+      "minLength": 1,
       "description": "Unique identifier for this scenario."
     },
     "description": {
@@ -17,12 +18,11 @@
     },
     "input": {
       "type": "object",
-      "description": "The input presented to the agent under test.",
+      "description": "Input presented to the target under test.",
       "additionalProperties": false,
       "properties": {
         "messages": {
           "type": "array",
-          "description": "Ordered list of messages forming the conversation input.",
           "items": {
             "type": "object",
             "required": ["role", "content"],
@@ -30,113 +30,165 @@
             "properties": {
               "role": {
                 "type": "string",
-                "enum": ["system", "user", "assistant"],
-                "description": "The role of the message sender."
+                "enum": ["system", "user", "assistant"]
               },
               "content": {
-                "type": "string",
-                "description": "The text content of the message."
-              }
-            }
-          }
-        }
-      }
-    },
-    "world": {
-      "type": "object",
-      "description": "Simulated world configuration including external tools and databases.",
-      "additionalProperties": false,
-      "properties": {
-        "tools": {
-          "type": "object",
-          "description": "Map of tool name to tool world reference or inline definition.",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "ref": {
-                "type": "string",
-                "description": "Reference to an external tool-world YAML file."
-              },
-              "state": {
-                "type": "string",
-                "description": "Which state the tool should be in (e.g. nominal, timeout)."
+                "type": "string"
               }
             }
           }
         },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "anyOf": [
+        { "required": ["messages"] },
+        { "required": ["payload"] }
+      ]
+    },
+    "world": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "object",
+          "description": "Map of tool name to state name.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "databases": {
           "type": "object",
-          "description": "Map of database name to database world reference or inline definition.",
+          "description": "Map of database name to seed-set config.",
           "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "ref": {
+            "oneOf": [
+              {
                 "type": "string",
-                "description": "Reference to an external db-world YAML file."
+                "minLength": 1
               },
-              "seed_set": {
-                "type": "string",
-                "description": "Which seed data set to load."
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["seed_sets"],
+                "properties": {
+                  "seed_sets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  }
+                }
               }
-            }
+            ]
           }
         }
       }
     },
     "assertions": {
       "type": "array",
-      "description": "List of assertions to evaluate against the agent's output.",
+      "description": "Assertions to evaluate against scenario execution.",
       "items": {
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-          "type": {
-            "type": "string",
-            "description": "The assertion type (e.g. contains, tool_called, json_path, llm_judge)."
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "schema"],
+            "properties": {
+              "type": { "const": "output_schema" },
+              "schema": { "type": "object" }
+            }
           },
-          "value": {
-            "description": "The expected value or pattern for the assertion."
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "required"],
+            "properties": {
+              "type": { "const": "tool_sequence" },
+              "required": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              },
+              "forbidden": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
           },
-          "path": {
-            "type": "string",
-            "description": "JSON path expression for json_path assertions."
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "tool", "invariant"],
+            "properties": {
+              "type": { "const": "tool_args_invariant" },
+              "tool": { "type": "string", "minLength": 1 },
+              "invariant": { "type": "string", "minLength": 1 }
+            }
           },
-          "tool": {
-            "type": "string",
-            "description": "Tool name for tool_called assertions."
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "retry_cap" },
+              "tool": { "type": "string", "minLength": 1 },
+              "max_retries": { "type": "integer", "minimum": 0 }
+            }
           },
-          "prompt": {
-            "type": "string",
-            "description": "Prompt for llm_judge assertions."
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "forbidden"],
+            "properties": {
+              "type": { "const": "forbidden_tool" },
+              "forbidden": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              }
+            }
           },
-          "negate": {
-            "type": "boolean",
-            "default": false,
-            "description": "If true, the assertion passes when the condition is NOT met."
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "sensitive_leak" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "output_derivable" }
+            }
           }
-        }
+        ]
       }
     },
     "chaos": {
       "type": "boolean",
       "default": false,
-      "description": "If true, inject random failures and latency into the simulated world."
+      "description": "If true, allows multi-fault scenarios to run."
     },
     "tags": {
       "type": "array",
-      "description": "Tags for filtering and grouping scenarios.",
       "items": {
         "type": "string"
       }
     },
     "beta_model": {
       "type": "boolean",
-      "default": false,
-      "description": "If true, this scenario requires a beta/preview model to run."
+      "default": false
     },
     "beta_reason": {
-      "type": "string",
-      "description": "Explanation of why this scenario requires a beta model."
+      "type": "string"
     }
   }
 }

@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gauntlet-dev/gauntlet/internal/redaction"
 )
 
 // WriteSummary writes a GitHub-flavored Markdown summary.
 func WriteSummary(dir string, result *RunResult) error {
-	md := GenerateMarkdown(result)
+	md := redaction.DefaultRedactor().RedactString(GenerateMarkdown(result))
 	path := filepath.Join(dir, "summary.md")
 	return os.WriteFile(path, []byte(md), 0o644)
 }

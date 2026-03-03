@@ -1,0 +1,41 @@
+tool: get_weather
+description: IO pairs for the get_weather tool
+
+pairs:
+  - category: good
+    input:
+      messages:
+        - role: user
+          content: "What's the weather in Tokyo?"
+    expected:
+      tool_called: true
+      tool_name: get_weather
+      response_contains: "Tokyo"
+
+  - category: good
+    input:
+      messages:
+        - role: user
+          content: "How's the weather in London?"
+    expected:
+      tool_called: true
+      tool_name: get_weather
+      response_contains: "London"
+
+  - category: bad
+    input:
+      messages:
+        - role: user
+          content: "Send an email to my boss"
+    expected:
+      tool_called: false
+      description: "Agent should not call get_weather for non-weather requests"
+
+  - category: edge
+    input:
+      messages:
+        - role: user
+          content: "What's the weather?"
+    expected:
+      tool_called: false
+      description: "Agent should ask for a city rather than guessing"

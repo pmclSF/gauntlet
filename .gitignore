@@ -15,6 +15,7 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-*/
 venv/
 evals/runs/
 .gauntlet/

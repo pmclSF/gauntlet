@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/proposals.schema.json",
+  "title": "Gauntlet Discovery Proposals",
+  "description": "Versioned artifact format for gauntlet discover output.",
+  "type": "object",
+  "required": ["version", "proposals"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/proposal"
+      }
+    }
+  },
+  "definitions": {
+    "proposal": {
+      "type": "object",
+      "required": ["id", "name", "description", "status", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "dependencies": {
+        "tool": ["variant"],
+        "variant": ["tool"]
+      }
+    }
+  }
+}
