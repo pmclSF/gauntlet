@@ -24,10 +24,24 @@ func (a *OutputSchemaAssertion) Evaluate(ctx Context) Result {
 		}
 	}
 
-	// Get schema from context (would be passed via spec properties)
-	schemaData := ctx.Baseline
-	if schemaData != nil && schemaData.OutputSchema != nil {
-		schemaBytes, err := json.Marshal(schemaData.OutputSchema)
+	var schemaObj map[string]interface{}
+	if rawSchema, ok := ctx.Spec["schema"]; ok {
+		parsedSchema, err := asStringMap(rawSchema)
+		if err != nil {
+			return Result{
+				AssertionType: a.Type(),
+				Passed:        false,
+				Message:       fmt.Sprintf("invalid output schema in scenario: %v", err),
+				DocketHint:    "output.schema_mismatch",
+			}
+		}
+		schemaObj = parsedSchema
+	} else if ctx.Baseline != nil && ctx.Baseline.OutputSchema != nil {
+		schemaObj = ctx.Baseline.OutputSchema
+	}
+
+	if schemaObj != nil {
+		schemaBytes, err := json.Marshal(schemaObj)
 		if err != nil {
 			return Result{
 				AssertionType: a.Type(),

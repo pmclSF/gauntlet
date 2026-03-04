@@ -185,7 +185,15 @@ Then open `http://localhost:7432` in your browser.
 Auto-discover test proposals from your codebase:
 
 ```bash
-gauntlet discover --tools evals/world/tools --output evals/proposals.yaml
+gauntlet discover \
+  --tools evals/world/tools \
+  --python-dirs agent \
+  --db-schemas evals/world/databases \
+  --exclude-tools send_email \
+  --output evals/proposals.yaml
 ```
 
 Review and approve proposals in the UI or YAML file.
+
+`gauntlet run` now performs this discovery step automatically by default and
+materializes `auto_*.yaml` scenarios when the target suite is empty.

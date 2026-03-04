@@ -29,6 +29,7 @@ type Context struct {
 	WorldState   WorldState
 	Baseline     *ContractBaseline
 	FixtureUsed  map[string]string
+	Spec         map[string]interface{}
 }
 
 // WorldState represents the assembled world state for assertion context.
@@ -98,8 +99,14 @@ func EvaluateAll(specs []scenario.AssertionSpec, ctx Context) []Result {
 			})
 			continue
 		}
-		// Inject spec properties into context if needed
-		result := a.Evaluate(ctx)
+		specCtx := ctx
+		specCtx.Spec = spec.Raw
+		result := a.Evaluate(specCtx)
+		if result.AssertionType == "" {
+			result.AssertionType = spec.Type
+		}
+		// Enforce registry soft/hard contract even if assertion impl forgets.
+		result.Soft = a.IsSoft()
 		results = append(results, result)
 	}
 	return results

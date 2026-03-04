@@ -2,8 +2,12 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gauntlet-dev/gauntlet/internal/fixture"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
 )
 
 func TestModeConstants(t *testing.T) {
@@ -115,8 +119,12 @@ func TestEnvVarsWithoutCA(t *testing.T) {
 	expected := []string{
 		"HTTP_PROXY=http://127.0.0.1:8080",
 		"HTTPS_PROXY=http://127.0.0.1:8080",
+		"ALL_PROXY=http://127.0.0.1:8080",
 		"http_proxy=http://127.0.0.1:8080",
 		"https_proxy=http://127.0.0.1:8080",
+		"all_proxy=http://127.0.0.1:8080",
+		"NO_PROXY=",
+		"no_proxy=",
 	}
 
 	if len(vars) != len(expected) {
@@ -145,9 +153,9 @@ func TestEnvVarsWithCA(t *testing.T) {
 	certPath := "/tmp/ca.pem"
 	vars := p.EnvVars(certPath)
 
-	// Should have 4 proxy vars + 4 CA vars
-	if len(vars) != 8 {
-		t.Fatalf("EnvVars(): expected 8 entries with CA, got %d: %v", len(vars), vars)
+	// Should have 8 proxy vars + 4 CA vars
+	if len(vars) != 12 {
+		t.Fatalf("EnvVars(): expected 12 entries with CA, got %d: %v", len(vars), vars)
 	}
 
 	// Check that CA env vars are included
@@ -232,6 +240,75 @@ func TestTraceEntryFields(t *testing.T) {
 	}
 	if entry.DurationMs != 150 {
 		t.Errorf("DurationMs: got %d, want 150", entry.DurationMs)
+	}
+}
+
+func TestProxyCanonicalHashConsistency(t *testing.T) {
+	bodyA := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role":"user","content":"hello"}],
+		"request_id": "abc123",
+		"stream": false,
+		"sdk_new_field": "alpha"
+	}`)
+	bodyB := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role":"user","content":"hello"}],
+		"request_id": "xyz789",
+		"stream": true,
+		"sdk_new_field": "alpha"
+	}`)
+	bodyC := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role":"user","content":"hello"}],
+		"request_id": "xyz789",
+		"stream": false,
+		"sdk_new_field": "beta"
+	}`)
+
+	normalizer := providers.Detect("api.openai.com", "/v1/chat/completions", bodyA, providers.AllNormalizers())
+
+	ca, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, bodyA)
+	if err != nil {
+		t.Fatalf("normalize A: %v", err)
+	}
+	cb, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, bodyB)
+	if err != nil {
+		t.Fatalf("normalize B: %v", err)
+	}
+	cc, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, bodyC)
+	if err != nil {
+		t.Fatalf("normalize C: %v", err)
+	}
+
+	jA, err := fixture.CanonicalizeRequest(ca)
+	if err != nil {
+		t.Fatalf("canonicalize A: %v", err)
+	}
+	jB, err := fixture.CanonicalizeRequest(cb)
+	if err != nil {
+		t.Fatalf("canonicalize B: %v", err)
+	}
+	jC, err := fixture.CanonicalizeRequest(cc)
+	if err != nil {
+		t.Fatalf("canonicalize C: %v", err)
+	}
+
+	hA := fixture.HashCanonical(jA)
+	hB := fixture.HashCanonical(jB)
+	hC := fixture.HashCanonical(jC)
+
+	if hA != hB {
+		t.Fatalf("hash mismatch for request_id/stream-only variation: %s vs %s", hA, hB)
+	}
+	if hA == hC {
+		t.Fatalf("hash should change when unknown field changes: %s vs %s", hA, hC)
+	}
+	if strings.Contains(string(jA), "request_id") || strings.Contains(string(jA), "\"stream\"") {
+		t.Fatalf("canonical request should not contain denylisted fields: %s", string(jA))
+	}
+	if !strings.Contains(string(jA), "\"sdk_new_field\":\"alpha\"") {
+		t.Fatalf("canonical request should preserve unknown fields in extra: %s", string(jA))
 	}
 }
 

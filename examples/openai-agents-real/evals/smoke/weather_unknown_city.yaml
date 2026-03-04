@@ -1,0 +1,26 @@
+scenario: weather_unknown_city
+description: "User asks for weather without specifying a city — agent should ask for clarification"
+tags:
+  - smoke
+  - edge-case
+  - real-repo
+
+input:
+  messages:
+    - role: user
+      content: "What's the weather?"
+
+world:
+  tools:
+    get_weather: nominal
+
+assertions:
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response"]
+      properties:
+        response:
+          type: string
+  - type: forbidden_tool
+    forbidden: ["get_weather"]

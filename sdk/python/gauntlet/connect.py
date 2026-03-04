@@ -5,10 +5,12 @@ import random
 import time
 import datetime
 import locale
+from unittest.mock import patch
 
 _connected = False
 _mode = None
 _freeze_time = None
+_patchers = []
 
 
 def is_enabled() -> bool:
@@ -37,6 +39,7 @@ def connect():
         return
 
     _mode = get_mode()
+    _force_proxy_for_loopback()
 
     # Freeze time
     freeze_time_str = os.environ.get("GAUNTLET_FREEZE_TIME")
@@ -78,30 +81,72 @@ def connect():
     _connected = True
 
 
+def _force_proxy_for_loopback():
+    """Force proxy usage for loopback/local calls in supported HTTP clients."""
+    proxy = (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+    )
+    if proxy:
+        os.environ["ALL_PROXY"] = proxy
+        os.environ["all_proxy"] = proxy
+
+    # Clearing NO_PROXY/no_proxy prevents bypass for localhost/127.0.0.1 in clients
+    # that honor these vars directly.
+    os.environ["NO_PROXY"] = ""
+    os.environ["no_proxy"] = ""
+
+
 def _patch_time(frozen: datetime.datetime):
-    """Monkey-patch datetime and time modules to return frozen values."""
-    frozen_epoch = frozen.timestamp()
+    """Patch datetime and time modules to return frozen values."""
+    frozen_utc = frozen
+    if frozen_utc.tzinfo is None:
+        frozen_utc = frozen_utc.replace(tzinfo=datetime.timezone.utc)
+    frozen_epoch = frozen_utc.timestamp()
+    real_datetime = datetime.datetime
+    real_localtime = time.localtime
 
-    # Patch datetime.datetime.now
-    _original_now = datetime.datetime.now
-
-    class FrozenDatetime(datetime.datetime):
+    class FrozenDatetime(real_datetime):
         @classmethod
         def now(cls, tz=None):
-            if tz is not None:
-                return frozen.astimezone(tz)
-            return frozen
+            if tz is None:
+                return frozen_utc.replace(tzinfo=None)
+            return frozen_utc.astimezone(tz)
 
         @classmethod
         def utcnow(cls):
-            return frozen
+            return frozen_utc.astimezone(datetime.timezone.utc).replace(
+                tzinfo=None
+            )
 
-    datetime.datetime = FrozenDatetime
+    _start_patch("datetime.datetime", FrozenDatetime)
+    _start_patch("time.time", lambda: frozen_epoch)
+    _start_patch(
+        "time.localtime",
+        lambda secs=None: real_localtime(
+            frozen_epoch if secs is None else secs
+        ),
+    )
 
-    # Patch time.time
-    _original_time = time.time
-    time.time = lambda: frozen_epoch
 
-    # Patch time.localtime
-    _original_localtime = time.localtime
-    time.localtime = lambda secs=None: _original_localtime(frozen_epoch)
+def disconnect():
+    """Undo active patches and reset connect() state."""
+    global _connected, _mode, _freeze_time, _patchers
+
+    for p in reversed(_patchers):
+        try:
+            p.stop()
+        except RuntimeError:
+            pass
+    _patchers = []
+    _connected = False
+    _mode = None
+    _freeze_time = None
+
+
+def _start_patch(target: str, value):
+    patcher = patch(target, new=value)
+    patcher.start()
+    _patchers.append(patcher)

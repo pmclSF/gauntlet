@@ -1,0 +1,17 @@
+{
+  "scenario": "balance_inquiry",
+  "suite": "smoke",
+  "tool_sequence": ["customer_name", "customer_balance"],
+  "output_schema": {
+    "type": "object",
+    "required": ["response", "support_advice", "block_card", "risk"],
+    "properties": {
+      "response": {"type": "string"},
+      "support_advice": {"type": "string"},
+      "block_card": {"type": "boolean"},
+      "risk": {"type": "integer"}
+    }
+  },
+  "required_fields": ["response", "support_advice", "block_card", "risk"],
+  "forbidden_content": []
+}

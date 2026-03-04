@@ -25,9 +25,8 @@ func TestDetectMode_Local(t *testing.T) {
 func TestDetectMode_PRCI(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
-	// Clear fork-related vars so it's treated as a same-repo PR.
-	t.Setenv("GITHUB_HEAD_REF", "")
-	t.Setenv("GITHUB_REPOSITORY", "")
+	t.Setenv("GITHUB_REPOSITORY", "acme/agent")
+	t.Setenv("GITHUB_HEAD_REPO", "acme/agent")
 
 	mode := DetectMode()
 	if mode != "pr_ci" {
@@ -35,11 +34,11 @@ func TestDetectMode_PRCI(t *testing.T) {
 	}
 }
 
-func TestDetectMode_ForkPR(t *testing.T) {
+func TestDetectMode_ForkPR_FromEnv(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
-	t.Setenv("GITHUB_HEAD_REF", "feature-branch")
-	t.Setenv("GITHUB_REPOSITORY", "owner/repo")
+	t.Setenv("GITHUB_REPOSITORY", "acme/agent")
+	t.Setenv("GITHUB_HEAD_REPO", "contrib/agent-fork")
 
 	mode := DetectMode()
 	if mode != "fork_pr" {
@@ -47,7 +46,25 @@ func TestDetectMode_ForkPR(t *testing.T) {
 	}
 }
 
-func TestDetectMode_Nightly(t *testing.T) {
+func TestDetectMode_ForkPR_FromEventPayload(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
+	t.Setenv("GITHUB_REPOSITORY", "acme/agent")
+	t.Setenv("GITHUB_HEAD_REPO", "")
+	t.Setenv("GITHUB_EVENT_PATH", writeEventPayload(t, `{
+		"pull_request": {
+			"head": {"repo": {"full_name": "contrib/agent-fork"}},
+			"base": {"repo": {"full_name": "acme/agent"}}
+		}
+	}`))
+
+	mode := DetectMode()
+	if mode != "fork_pr" {
+		t.Errorf("DetectMode() = %q, want %q", mode, "fork_pr")
+	}
+}
+
+func TestDetectMode_NightlySchedule(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_EVENT_NAME", "schedule")
 
@@ -57,13 +74,25 @@ func TestDetectMode_Nightly(t *testing.T) {
 	}
 }
 
-func TestDetectMode_Push(t *testing.T) {
+func TestDetectMode_NightlyPushMain(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_EVENT_NAME", "push")
+	t.Setenv("GITHUB_REF", "refs/heads/main")
+
+	mode := DetectMode()
+	if mode != "nightly" {
+		t.Errorf("DetectMode() = %q, want %q", mode, "nightly")
+	}
+}
+
+func TestDetectMode_PushNonMain(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "push")
+	t.Setenv("GITHUB_REF", "refs/heads/feature/test")
 
 	mode := DetectMode()
 	if mode != "pr_ci" {
-		t.Errorf("DetectMode() = %q, want %q (default for push)", mode, "pr_ci")
+		t.Errorf("DetectMode() = %q, want %q", mode, "pr_ci")
 	}
 }
 
@@ -115,6 +144,30 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Error("workflow file is empty")
+	}
+	workflowText := string(data)
+	if !strings.Contains(workflowText, "persist-credentials: false") {
+		t.Error("workflow should set checkout persist-credentials: false")
+	}
+	if !strings.Contains(workflowText, "permissions:") || !strings.Contains(workflowText, "contents: read") {
+		t.Error("workflow should use least-privilege permissions")
+	}
+	requiredPins := []string{
+		"actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
+		"actions/setup-go@479c797a328a0dfa73d811c5d9d2d8aa7b69b838",
+		"actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d",
+		"actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+	}
+	for _, pin := range requiredPins {
+		if !strings.Contains(workflowText, pin) {
+			t.Errorf("workflow missing required pinned action reference: %s", pin)
+		}
+	}
+	if strings.Contains(workflowText, "actions/checkout@v4") ||
+		strings.Contains(workflowText, "actions/setup-go@v5") ||
+		strings.Contains(workflowText, "actions/setup-python@v5") ||
+		strings.Contains(workflowText, "actions/upload-artifact@v4") {
+		t.Error("workflow should not reference tag-based action versions")
 	}
 
 	// Verify policy content is non-empty.
@@ -238,6 +291,15 @@ func writeReqs(t *testing.T, dir, content string) {
 	if err := os.WriteFile(reqPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write requirements.txt: %v", err)
 	}
+}
+
+func writeEventPayload(t *testing.T, content string) string {
+	t.Helper()
+	eventPath := filepath.Join(t.TempDir(), "event.json")
+	if err := os.WriteFile(eventPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write event payload: %v", err)
+	}
+	return eventPath
 }
 
 func isSubpath(base, target string) bool {

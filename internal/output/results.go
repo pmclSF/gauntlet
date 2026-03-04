@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gauntlet-dev/gauntlet/internal/assertions"
+	"github.com/gauntlet-dev/gauntlet/internal/redaction"
 )
 
 // RunResult is the top-level results.json structure.
@@ -64,7 +65,11 @@ func WriteResults(dir string, result *RunResult) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
+	redacted, err := redaction.DefaultRedactor().RedactJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to redact results: %w", err)
+	}
 
 	path := filepath.Join(dir, "results.json")
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, redacted, 0o644)
 }

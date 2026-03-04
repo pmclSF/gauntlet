@@ -1,0 +1,16 @@
+{
+  "fixture_id": "5d7eb64b919f27af9a7830dc931f4f26f0f61fe0efd13fb813bbc7af61e2ab45",
+  "hash_version": 1,
+  "canonical_hash": "5d7eb64b919f27af9a7830dc931f4f26f0f61fe0efd13fb813bbc7af61e2ab45",
+  "tool_name": "get_weather",
+  "canonical_request": {
+    "tool": "get_weather",
+    "args": {"city": "London"}
+  },
+  "response": {
+    "city": "London",
+    "temperature_range": "8-14C",
+    "conditions": "Cloudy with light rain."
+  },
+  "recorded_at": "2026-03-03T00:00:00Z"
+}
