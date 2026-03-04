@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +53,15 @@ func TestNewProxy(t *testing.T) {
 	}
 	if p.Redactor == nil {
 		t.Error("Redactor: expected non-nil (DefaultRedactor)")
+	}
+	if p.MaxHeaderBytes <= 0 {
+		t.Errorf("MaxHeaderBytes: got %d, want positive default", p.MaxHeaderBytes)
+	}
+	if p.MaxBodyBytes <= 0 {
+		t.Errorf("MaxBodyBytes: got %d, want positive default", p.MaxBodyBytes)
+	}
+	if p.MaxRequestsPerConn <= 0 {
+		t.Errorf("MaxRequestsPerConn: got %d, want positive default", p.MaxRequestsPerConn)
 	}
 }
 
@@ -417,12 +428,211 @@ func TestHandleDecryptedConnection_ProperStatusText(t *testing.T) {
 	<-done
 }
 
+func TestHandleHTTP_MalformedJSONReturnsBadRequest(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(`{"model":`))
+	req.Host = "api.openai.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"code":"malformed_json_request"`) {
+		t.Fatalf("expected malformed_json_request code, got: %s", body)
+	}
+}
+
+func TestHandleHTTP_RequestBodyTooLargeReturns413(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	p.MaxBodyBytes = 8
+
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o"}`))
+	req.Host = "api.openai.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"request_body_too_large"`) {
+		t.Fatalf("expected request_body_too_large code, got: %s", w.Body.String())
+	}
+}
+
+func TestHandleHTTP_RequestHeaderTooLargeReturns431(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	p.MaxHeaderBytes = 32
+
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(`{}`))
+	req.Host = "api.openai.com"
+	req.Header.Set("X-Large-Header", strings.Repeat("a", 128))
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestHeaderFieldsTooLarge)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"request_header_too_large"`) {
+		t.Fatalf("expected request_header_too_large code, got: %s", w.Body.String())
+	}
+}
+
+func TestHandleHTTP_WebSocketUpgradeNotSupported(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	req := httptest.NewRequest("GET", "http://api.openai.com/v1/chat/completions", nil)
+	req.Host = "api.openai.com"
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotImplemented)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"websocket_not_supported"`) {
+		t.Fatalf("expected websocket_not_supported code, got: %s", w.Body.String())
+	}
+}
+
+func TestHandleHTTP_FixtureMissIncludesNearestCandidateGuidance(t *testing.T) {
+	store := fixture.NewStore(t.TempDir())
+	recordedBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
+	seedOpenAIRecordedFixture(t, store, recordedBody)
+
+	missingBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"different"}]}`
+	normalizer := providers.Detect("api.openai.com", "/v1/chat/completions", []byte(recordedBody), providers.AllNormalizers())
+	canonical, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, []byte(recordedBody))
+	if err != nil {
+		t.Fatalf("normalize recorded body: %v", err)
+	}
+	canonicalBytes, err := fixture.CanonicalizeRequest(canonical)
+	if err != nil {
+		t.Fatalf("canonicalize recorded body: %v", err)
+	}
+	recordedHash := fixture.HashCanonical(canonicalBytes)
+
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(missingBody))
+	req.Host = "api.openai.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Result().StatusCode, http.StatusBadGateway)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"code":"fixture_miss"`) {
+		t.Fatalf("expected fixture_miss code, got: %s", body)
+	}
+	if !strings.Contains(body, "Nearest recorded fixtures:") {
+		t.Fatalf("expected nearest-candidate guidance, got: %s", body)
+	}
+	if !strings.Contains(body, recordedHash) {
+		t.Fatalf("expected nearest candidate hash %s, got: %s", recordedHash, body)
+	}
+}
+
+func TestHandleDecryptedConnection_HTTP2PrefaceReturns505(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	client, server := net.Pipe()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.handleDecryptedConnection(server, "api.openai.com")
+	}()
+
+	go func() {
+		_, _ = client.Write([]byte(http2ClientPreface))
+	}()
+
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var resp []byte
+	buf := make([]byte, 2048)
+	for {
+		n, err := client.Read(buf)
+		if n > 0 {
+			resp = append(resp, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	respStr := string(resp)
+	if !strings.Contains(respStr, "505") {
+		t.Fatalf("expected 505 response, got: %s", respStr)
+	}
+	if !strings.Contains(respStr, `"code":"http2_not_supported"`) {
+		t.Fatalf("expected http2_not_supported code, got: %s", respStr)
+	}
+	<-done
+}
+
+func TestHandleDecryptedConnection_MaxRequestsPerConnection(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := fixture.NewStore(tmpDir)
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
+	seedOpenAIRecordedFixture(t, store, body)
+
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+	p.MaxRequestsPerConn = 1
+
+	req1 := fmt.Sprintf("POST /v1/chat/completions HTTP/1.1\r\nHost: api.openai.com\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n%s", len(body), body)
+	req2 := fmt.Sprintf("POST /v1/chat/completions HTTP/1.1\r\nHost: api.openai.com\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.handleDecryptedConnection(server, "api.openai.com")
+	}()
+
+	go func() {
+		_, _ = client.Write([]byte(req1 + req2))
+	}()
+
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var resp []byte
+	buf := make([]byte, 4096)
+	for {
+		n, err := client.Read(buf)
+		if n > 0 {
+			resp = append(resp, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	respStr := string(resp)
+	if !strings.Contains(respStr, "200 OK") {
+		t.Fatalf("expected first request success, got: %s", respStr)
+	}
+	if !strings.Contains(respStr, "429 Too Many Requests") {
+		t.Fatalf("expected request limit response, got: %s", respStr)
+	}
+	if !strings.Contains(respStr, `"code":"too_many_requests_per_connection"`) {
+		t.Fatalf("expected limit error code, got: %s", respStr)
+	}
+	<-done
+}
+
 func TestStripStreamFlag(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantHas  string // substring that should be present
-		wantNot  string // substring that should be absent
+		name    string
+		input   string
+		wantHas string // substring that should be present
+		wantNot string // substring that should be absent
 	}{
 		{
 			name:    "strips stream true",
@@ -431,9 +641,20 @@ func TestStripStreamFlag(t *testing.T) {
 			wantNot: `"stream"`,
 		},
 		{
+			name:    "strips stream options with stream true",
+			input:   `{"model":"gpt-4o","stream":true,"stream_options":{"include_usage":true},"messages":[]}`,
+			wantHas: `"model"`,
+			wantNot: `"stream_options"`,
+		},
+		{
 			name:    "keeps stream false",
 			input:   `{"model":"gpt-4","stream":false,"messages":[]}`,
 			wantHas: `"stream"`,
+		},
+		{
+			name:    "keeps stream string true unchanged",
+			input:   `{"model":"gpt-4","stream":"true","messages":[]}`,
+			wantHas: `"stream":"true"`,
 		},
 		{
 			name:    "no stream field",
@@ -495,4 +716,32 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func seedOpenAIRecordedFixture(t *testing.T, store *fixture.Store, body string) {
+	t.Helper()
+	normalizer := providers.Detect("api.openai.com", "/v1/chat/completions", []byte(body), providers.AllNormalizers())
+	canonical, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, []byte(body))
+	if err != nil {
+		t.Fatalf("normalize body: %v", err)
+	}
+	canonicalBytes, err := fixture.CanonicalizeRequest(canonical)
+	if err != nil {
+		t.Fatalf("canonicalize body: %v", err)
+	}
+	hash := fixture.HashCanonical(canonicalBytes)
+	mf := &fixture.ModelFixture{
+		FixtureID:        hash,
+		HashVersion:      1,
+		CanonicalHash:    hash,
+		ProviderFamily:   canonical.ProviderFamily,
+		Model:            canonical.Model,
+		CanonicalRequest: canonicalBytes,
+		Response:         json.RawMessage(`{"id":"resp_1","choices":[{"message":{"role":"assistant","content":"ok"}}]}`),
+		RecordedAt:       time.Now().UTC(),
+		RecordedBy:       "test",
+	}
+	if err := store.PutModelFixture(mf); err != nil {
+		t.Fatalf("put fixture: %v", err)
+	}
 }

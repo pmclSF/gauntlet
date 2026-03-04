@@ -8,6 +8,9 @@ var scenarioSchema []byte
 //go:embed proposals.schema.json
 var proposalsSchema []byte
 
+//go:embed gauntlet-policy.schema.json
+var gauntletPolicySchema []byte
+
 // ScenarioSchema returns the bundled scenario JSON schema.
 func ScenarioSchema() []byte {
 	out := make([]byte, len(scenarioSchema))
@@ -19,5 +22,12 @@ func ScenarioSchema() []byte {
 func ProposalsSchema() []byte {
 	out := make([]byte, len(proposalsSchema))
 	copy(out, proposalsSchema)
+	return out
+}
+
+// GauntletPolicySchema returns the bundled gauntlet policy JSON schema.
+func GauntletPolicySchema() []byte {
+	out := make([]byte, len(gauntletPolicySchema))
+	copy(out, gauntletPolicySchema)
 	return out
 }

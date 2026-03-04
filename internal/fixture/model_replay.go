@@ -10,9 +10,9 @@ import (
 
 // ModelReplay intercepts model calls (via proxy) and serves fixture responses.
 type ModelReplay struct {
-	Store   *Store
-	Suite   string
-	Traces  []ModelCallTrace
+	Store  *Store
+	Suite  string
+	Traces []ModelCallTrace
 }
 
 // ModelCallTrace records a single model call for assertion evaluation.
@@ -42,11 +42,15 @@ func (r *ModelReplay) Replay(cr *providers.CanonicalRequest) (*ModelFixture, err
 		return nil, fmt.Errorf("failed to load model fixture: %w", err)
 	}
 	if fixture == nil {
+		candidates, _ := r.Store.NearestModelFixtureCandidates(cr.ProviderFamily, cr.Model, hash, 3)
 		return nil, &ErrFixtureMiss{
-			FixtureType:   "model:" + cr.Model,
-			CanonicalHash: hash,
-			CanonicalJSON: string(canonical),
-			RecordCmd:     fmt.Sprintf("GAUNTLET_MODEL_MODE=live gauntlet record --suite %s", r.Suite),
+			FixtureType:    "model:" + cr.Model,
+			ProviderFamily: cr.ProviderFamily,
+			Model:          cr.Model,
+			CanonicalHash:  hash,
+			CanonicalJSON:  string(canonical),
+			RecordCmd:      fmt.Sprintf("GAUNTLET_MODEL_MODE=live gauntlet record --suite %s", r.Suite),
+			Candidates:     candidates,
 		}
 	}
 

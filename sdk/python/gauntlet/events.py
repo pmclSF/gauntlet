@@ -28,6 +28,9 @@ def emit_event(
     canonical_hash: Optional[str] = None,
     duration_ms: int = 0,
     error: Optional[str] = None,
+    provider_family: Optional[str] = None,
+    model: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ):
     """Emit a structured trace event."""
     event = {
@@ -49,6 +52,12 @@ def emit_event(
         event["duration_ms"] = duration_ms
     if error is not None:
         event["error"] = error
+    if provider_family is not None:
+        event["provider_family"] = provider_family
+    if model is not None:
+        event["model"] = model
+    if metadata is not None:
+        event["metadata"] = metadata
 
     line = json.dumps(event, separators=(",", ":"), default=str)
     _write_trace_line(line)

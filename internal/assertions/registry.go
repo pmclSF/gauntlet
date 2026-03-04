@@ -5,6 +5,7 @@ package assertions
 
 import (
 	"encoding/json"
+	"sort"
 
 	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 	"github.com/gauntlet-dev/gauntlet/internal/tut"
@@ -83,6 +84,17 @@ func Register(a Assertion) {
 func Get(typeName string) (Assertion, bool) {
 	a, ok := registry[typeName]
 	return a, ok
+}
+
+// RegisteredTypes returns all registered assertion type names sorted
+// lexicographically for deterministic policy validation and messaging.
+func RegisteredTypes() []string {
+	out := make([]string, 0, len(registry))
+	for name := range registry {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // EvaluateAll runs all assertions from a scenario spec against the context.

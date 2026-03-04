@@ -39,6 +39,17 @@ gauntlet --version
 # One line, at the top of your agent entrypoint
 import gauntlet
 gauntlet.connect()  # no-op if Gauntlet not running; safe in production
+# connect() also enables OpenAI/Anthropic transport hooks and LangChain callback hooks when available.
+```
+
+Optional explicit adapter helpers (advanced):
+
+```python
+from gauntlet.adapters import patch_openai_client, patch_anthropic_client, patch_langchain_llm
+
+client = patch_openai_client(client)
+anthropic_client = patch_anthropic_client(anthropic_client)
+llm = patch_langchain_llm(llm)
 ```
 
 ### 3. Wrap your tools
@@ -97,15 +108,40 @@ assertions:
 ```bash
 # Record tool and model fixtures from a trusted run
 GAUNTLET_MODEL_MODE=live gauntlet record --suite smoke
+# This also signs fixtures and generates .gauntlet/fixture-signing-key.pem(.pub.pem)
+# Commit only `.gauntlet/fixture-signing-key.pem.pub.pem` (never commit private key).
 
 # Establish contract baseline
 gauntlet baseline --suite smoke
+
+# Baseline updates also emit rollback artifacts:
+#   evals/baselines/<suite>/rollback.manifest.json
+#   evals/baselines/<suite>/ROLLBACK_PR_TEMPLATE.md
+
+# When canonical hash version changes, migrate existing fixtures
+gauntlet migrate-fixtures --from-version 1 --to-version 2 --dry-run
+gauntlet migrate-fixtures --from-version 1 --to-version 2
+
+# Generate/update replay lockfile for deterministic tamper detection
+gauntlet lock-fixtures --suite smoke
+
+# Sign run artifacts with an evidence manifest (also done by generated CI workflow)
+gauntlet sign-artifacts --dir evals/runs
 ```
 
 ### 7. Run the suite
 
 ```bash
 gauntlet run --suite smoke
+# Optional: strict policy parsing (unknown keys are hard errors)
+gauntlet run --policy-strict --suite smoke
+# Explicit runner/model mode separation:
+gauntlet run --suite smoke --runner-mode pr_ci --model-mode recorded
+# Add deterministic per-scenario timeout budget (ms):
+gauntlet run --suite smoke --budget 300000 --scenario-budget 45000
+
+# Preflight checks for policy, modes, proxy trust, fixtures, and egress:
+gauntlet doctor --suite smoke
 ```
 
 ### 8. Push and watch CI gate your PR
@@ -124,6 +160,18 @@ Choose the level that fits your setup:
 
 Minimal still provides real value. Even without structured traces, blocking network
 egress and enforcing a time budget catches a class of regressions most CI setups miss.
+
+## SDK capability negotiation
+
+Gauntlet SDKs emit a versioned `sdk_capabilities` handshake (`protocol_version: 1`)
+into the trace stream. The runner consumes this negotiation report and emits a soft
+`adapter_capabilities` diagnostic when:
+
+- capability negotiation is missing
+- protocol version is unsupported
+- an adapter is enabled but runtime patching failed
+
+This keeps CI deterministic while still surfacing integration drift early.
 
 ---
 
@@ -205,17 +253,45 @@ seed_sets:
         total_cents: 4999
 ```
 
+Single-fault policy counts both non-nominal tool states and non-nominal DB seed variants.
+Set `chaos: true` in a scenario to allow multi-fault combinations intentionally.
+
+## Mode semantics
+
+- `runner_mode` / `--runner-mode`: execution context (`local`, `pr_ci`, `fork_pr`, `nightly`)
+- `model_mode` / `--model-mode`: fixture behavior (`recorded`, `live`, `passthrough`)
+- `mode` / `--mode`: legacy compatibility alias; prefer explicit runner/model fields and flags
+- `proxy.mode`: model replay mode only (`recorded`, `live`, `passthrough`)
+
 ---
 
 ## CI behavior
 
 ### PR CI (hermetic)
 - Zero network egress — enforced at process level
+- Mandatory outbound socket egress self-test before scenario execution
+- Recorded replay mode verifies `evals/fixtures/replay.lock.json` integrity before execution
+- Replay lockfile/canonical hash determinism is snapshot-tested against a cross-platform runtime matrix (`linux/darwin/windows`, `amd64/arm64`)
+- Recorded replay mode enforces fixture signatures against `.gauntlet/fixture-signing-key.pem.pub.pem`
+- Generated CI workflow runs `gauntlet scan-artifacts` and `gauntlet sign-artifacts` before upload-artifact
+- `scan-artifacts` includes a default prompt-injection marker denylist for recorded artifacts (opt-out: `redaction.prompt_injection_denylist: false`)
+- Optional hard allowlist for recorder identities via `GAUNTLET_TRUSTED_RECORDER_IDENTITIES`
 - Tool and model calls served from fixtures
-- Hard gates: schema violations, forbidden tool calls, retry cap violations
-- Soft signals: sensitive data patterns (reported, never blocking in v1)
+- Hard/soft assertion gating enforced from `evals/gauntlet.yml` (`assertions.hard_gates`, `assertions.soft_signals`)
+- Baseline-changing PRs must carry label `gauntlet/baseline-approved` (enforced by `gauntlet check-baseline-approval`)
 - Fork PRs: replay-only, no secrets, no judge calls
 - Target: < 5 minutes
+- Proxy enforces deterministic request parsing limits (header/body/request-count per connection)
+- Malformed JSON and unsupported websocket/HTTP2 tunnel traffic return explicit proxy error codes
+- Proxy CA assets require hardened permissions; doctor reports rotation warning before cert expiry
+- CLI failures emit canonical machine-parseable error code lines (`GAUNTLET_ERROR_CODE=<code>`)
+- Fixture misses include provider/model/hash context plus nearest recorded fixture candidates
+- Results include deterministic per-scenario causal taxonomy (`failure_category`) and effective scenario budgets
+- Results include lightweight run-history metadata (`history.previous`, `history.delta`) for regression velocity tracking
+- Per-scenario runtime determinism checks verify timezone/locale freeze application when SDK reports `determinism_env`
+- Non-Python SDKs emit explicit nondeterminism guard warnings until runtime freeze verification parity is available
+- Optional per-scenario TUT process limits available via `tut.resource_limits` (`cpu_seconds`, `memory_mb`, `open_files`)
+- Optional linux hostile-payload hardening via `tut.guardrails.hostile_payload` (+ `max_processes`)
 
 ### Nightly (trusted)
 - Live model calls (secrets available)

@@ -2,6 +2,10 @@ package tut
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +40,9 @@ func TestConfigFieldsFromJSON(t *testing.T) {
 		"adapter": "http",
 		"http_port": 9000,
 		"http_path": "/api/run",
-		"startup_ms": 3000
+		"startup_ms": 3000,
+		"resource_limits": {"cpu_seconds": 9, "memory_mb": 256, "open_files": 128},
+		"guardrails": {"hostile_payload": true, "max_processes": 64}
 	}`
 
 	var cfg Config
@@ -68,6 +74,12 @@ func TestConfigFieldsFromJSON(t *testing.T) {
 	if cfg.StartupMs != 3000 {
 		t.Errorf("StartupMs: got %d, want 3000", cfg.StartupMs)
 	}
+	if cfg.ResourceLimits.CPUSeconds != 9 || cfg.ResourceLimits.MemoryMB != 256 || cfg.ResourceLimits.OpenFiles != 128 {
+		t.Errorf("ResourceLimits: got %+v, want cpu=9 memory=256 open_files=128", cfg.ResourceLimits)
+	}
+	if !cfg.Guardrails.HostilePayload || cfg.Guardrails.MaxProcesses != 64 {
+		t.Errorf("Guardrails: got %+v, want hostile_payload=true max_processes=64", cfg.Guardrails)
+	}
 }
 
 func TestConfigMarshalJSON(t *testing.T) {
@@ -76,6 +88,15 @@ func TestConfigMarshalJSON(t *testing.T) {
 		Args:     []string{"index.js"},
 		Adapter:  "cli",
 		HTTPPort: 8080,
+		ResourceLimits: ResourceLimits{
+			CPUSeconds: 5,
+			MemoryMB:   128,
+			OpenFiles:  64,
+		},
+		Guardrails: Guardrails{
+			HostilePayload: true,
+			MaxProcesses:   32,
+		},
 	}
 
 	data, err := json.Marshal(cfg)
@@ -96,6 +117,12 @@ func TestConfigMarshalJSON(t *testing.T) {
 	}
 	if roundtrip.HTTPPort != cfg.HTTPPort {
 		t.Errorf("roundtrip HTTPPort: got %d, want %d", roundtrip.HTTPPort, cfg.HTTPPort)
+	}
+	if roundtrip.ResourceLimits != cfg.ResourceLimits {
+		t.Errorf("roundtrip ResourceLimits: got %+v, want %+v", roundtrip.ResourceLimits, cfg.ResourceLimits)
+	}
+	if roundtrip.Guardrails != cfg.Guardrails {
+		t.Errorf("roundtrip Guardrails: got %+v, want %+v", roundtrip.Guardrails, cfg.Guardrails)
 	}
 }
 
@@ -276,6 +303,156 @@ func TestTraceEventOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestParseTraceFile_ModelCallMetadata(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "trace.ndjson")
+	line := `{"gauntlet_event":true,"type":"model_call","timestamp":1735689600.25,"provider_family":"openai","model":"gpt-4o","canonical_hash":"abc123","args":{"endpoint":"/v1/chat/completions"},"result":{"id":"resp_1"},"duration_ms":17}`
+	if err := os.WriteFile(tracePath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	events, err := parseTraceFile(tracePath)
+	if err != nil {
+		t.Fatalf("parseTraceFile: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.EventType != "model_call" {
+		t.Fatalf("EventType = %q, want model_call", event.EventType)
+	}
+	if event.ModelCall == nil {
+		t.Fatal("expected model call metadata")
+	}
+	if event.ModelCall.ProviderFamily != "openai" {
+		t.Fatalf("ProviderFamily = %q, want openai", event.ModelCall.ProviderFamily)
+	}
+	if event.ModelCall.Model != "gpt-4o" {
+		t.Fatalf("Model = %q, want gpt-4o", event.ModelCall.Model)
+	}
+	if event.ModelCall.CanonicalHash != "abc123" {
+		t.Fatalf("CanonicalHash = %q, want abc123", event.ModelCall.CanonicalHash)
+	}
+}
+
+func TestParseTraceFile_SDKCapabilities(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "trace.ndjson")
+	line := `{"gauntlet_event":true,"type":"sdk_capabilities","timestamp":1735689600.5,"result":{"protocol_version":1,"sdk":"gauntlet-python","runtime":"python3.11","adapters":{"openai":{"enabled":true,"patched":false,"reason":"openai_not_installed"}}}}`
+	if err := os.WriteFile(tracePath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	events, err := parseTraceFile(tracePath)
+	if err != nil {
+		t.Fatalf("parseTraceFile: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.EventType != "sdk_capabilities" {
+		t.Fatalf("EventType = %q, want sdk_capabilities", event.EventType)
+	}
+	if event.SDKCapabilities == nil {
+		t.Fatal("expected sdk capabilities payload")
+	}
+	if event.SDKCapabilities.ProtocolVersion != CapabilityProtocolV1 {
+		t.Fatalf("ProtocolVersion = %d, want %d", event.SDKCapabilities.ProtocolVersion, CapabilityProtocolV1)
+	}
+	if event.SDKCapabilities.Adapters["openai"].Reason != "openai_not_installed" {
+		t.Fatalf("openai reason = %q", event.SDKCapabilities.Adapters["openai"].Reason)
+	}
+}
+
+func TestParseTraceFile_DeterminismEnvReport(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "trace.ndjson")
+	line := `{"gauntlet_event":true,"type":"determinism_env","timestamp":1735689600.6,"result":{"language":"python","runtime":"python3.11","requested_timezone":"UTC","effective_timezone":"UTC","timezone_applied":true,"requested_locale":"en_US.UTF-8","effective_locale":"en_US.UTF-8","locale_applied":true,"requested_freeze_time":"2025-01-15T10:00:00Z","time_patched":true}}`
+	if err := os.WriteFile(tracePath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	events, err := parseTraceFile(tracePath)
+	if err != nil {
+		t.Fatalf("parseTraceFile: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.EventType != "determinism_env" {
+		t.Fatalf("EventType = %q, want determinism_env", event.EventType)
+	}
+	if event.DeterminismEnv == nil {
+		t.Fatal("expected determinism environment report")
+	}
+	if !event.DeterminismEnv.TimezoneApplied {
+		t.Fatal("expected timezone_applied=true")
+	}
+	if event.DeterminismEnv.EffectiveTimezone != "UTC" {
+		t.Fatalf("effective timezone = %q, want UTC", event.DeterminismEnv.EffectiveTimezone)
+	}
+}
+
+func TestExtractSDKCapabilitiesReturnsMostRecent(t *testing.T) {
+	events := []TraceEvent{
+		{
+			EventType: "sdk_capabilities",
+			SDKCapabilities: &SDKCapabilities{
+				ProtocolVersion: CapabilityProtocolV1,
+				SDK:             "gauntlet-python",
+				Adapters: map[string]SDKAdapterCapability{
+					"openai": {Enabled: true, Patched: false, Reason: "first"},
+				},
+			},
+		},
+		{
+			EventType: "sdk_capabilities",
+			SDKCapabilities: &SDKCapabilities{
+				ProtocolVersion: CapabilityProtocolV1,
+				SDK:             "gauntlet-python",
+				Adapters: map[string]SDKAdapterCapability{
+					"openai": {Enabled: true, Patched: true},
+				},
+			},
+		},
+	}
+
+	report := ExtractSDKCapabilities(events)
+	if report == nil {
+		t.Fatal("expected capability report")
+	}
+	if !report.Adapters["openai"].Patched {
+		t.Fatal("expected most recent capabilities payload to be returned")
+	}
+}
+
+func TestExtractDeterminismEnvReportReturnsMostRecent(t *testing.T) {
+	events := []TraceEvent{
+		{
+			EventType: "determinism_env",
+			DeterminismEnv: &DeterminismEnvReport{
+				Language:          "python",
+				EffectiveTimezone: "UTC",
+			},
+		},
+		{
+			EventType: "determinism_env",
+			DeterminismEnv: &DeterminismEnvReport{
+				Language:          "python",
+				EffectiveTimezone: "Europe/Berlin",
+			},
+		},
+	}
+
+	report := ExtractDeterminismEnvReport(events)
+	if report == nil {
+		t.Fatal("expected determinism env report")
+	}
+	if report.EffectiveTimezone != "Europe/Berlin" {
+		t.Fatalf("effective timezone = %q, want Europe/Berlin", report.EffectiveTimezone)
+	}
+}
+
 // --- Adapter level tests ---
 
 func TestHTTPAdapterLevel(t *testing.T) {
@@ -370,5 +547,81 @@ func TestMergedProcessEnv_InheritHostEnv(t *testing.T) {
 	}
 	if m["SECRET_TOKEN"] != "topsecret" {
 		t.Fatalf("SECRET_TOKEN = %q, want topsecret", m["SECRET_TOKEN"])
+	}
+}
+
+func TestBuildResourceLimitScript(t *testing.T) {
+	script := buildResourceLimitScript(ResourceLimits{
+		CPUSeconds: 7,
+		MemoryMB:   256,
+		OpenFiles:  128,
+	})
+	required := []string{
+		"ulimit -n 128",
+		"ulimit -t 7",
+		"ulimit -v 262144",
+		"exec \"$@\"",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(script, fragment) {
+			t.Fatalf("script missing %q:\n%s", fragment, script)
+		}
+	}
+}
+
+func TestBuildGuardrailScript(t *testing.T) {
+	script := buildGuardrailScript(42)
+	required := []string{
+		"set -eu",
+		"ulimit -u 42",
+		"exec \"$@\"",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(script, fragment) {
+			t.Fatalf("script missing %q:\n%s", fragment, script)
+		}
+	}
+}
+
+func TestWrapWithResourceLimits_NoLimitsReturnsOriginalCommand(t *testing.T) {
+	cmd := exec.Command("echo", "hello")
+	wrapped, err := wrapWithResourceLimits(cmd, ResourceLimits{})
+	if err != nil {
+		t.Fatalf("wrapWithResourceLimits: %v", err)
+	}
+	if wrapped != cmd {
+		t.Fatal("expected original command when no limits configured")
+	}
+}
+
+func TestWrapWithHostilePayloadGuardrails_DisabledReturnsOriginalCommand(t *testing.T) {
+	cmd := exec.Command("echo", "hello")
+	wrapped, err := wrapWithHostilePayloadGuardrails(cmd, Guardrails{})
+	if err != nil {
+		t.Fatalf("wrapWithHostilePayloadGuardrails: %v", err)
+	}
+	if wrapped != cmd {
+		t.Fatal("expected original command when hostile payload guardrails disabled")
+	}
+}
+
+func TestWrapWithHostilePayloadGuardrails_EnabledBehavior(t *testing.T) {
+	cmd := exec.Command("echo", "hello")
+	wrapped, err := wrapWithHostilePayloadGuardrails(cmd, Guardrails{HostilePayload: true, MaxProcesses: 12})
+	if runtime.GOOS != "linux" {
+		if err == nil {
+			t.Fatal("expected unsupported OS error when hostile payload guardrails are enabled")
+		}
+		return
+	}
+	if err != nil {
+		// Some linux environments might not expose unshare in PATH.
+		if strings.Contains(err.Error(), "require 'unshare'") {
+			t.Skipf("skipping due to missing unshare: %v", err)
+		}
+		t.Fatalf("wrapWithHostilePayloadGuardrails: %v", err)
+	}
+	if filepath.Base(wrapped.Path) != "unshare" && filepath.Base(wrapped.Path) != "sh" {
+		t.Fatalf("expected unshare/sh wrapper, got %q", wrapped.Path)
 	}
 }

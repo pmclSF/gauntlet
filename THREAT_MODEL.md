@@ -9,7 +9,7 @@
 - Network: blocked at container level
 - Can it update baselines? NO — baseline writes require trusted context
 - Can it exfiltrate credentials? NO — no secrets present, network blocked
-- Can it DoS the runner? Mitigated by CPU/mem/disk limits and scenario timeout
+- Can it DoS the runner? Mitigated by CPU/mem/disk limits, scenario timeout, and optional linux hostile-payload guardrails (`tut.guardrails.hostile_payload`)
 
 ### Same-repo PR (semi-trusted)
 - Source: internal contributor or bot
@@ -49,12 +49,21 @@ Fields redacted by default:
 - **.x-api-key (HTTP headers)
 
 Patterns redacted by default:
-- Credit card numbers (Luhn-valid 13-19 digit strings)
-- Social Security Numbers (XXX-XX-XXXX)
+- Redaction write-path (`RedactJSON` / `RedactString`):
+  - Credit-card-like digit sequences (regex replacement)
+  - Social Security Numbers (XXX-XX-XXXX)
+
+`gauntlet scan-artifacts` detection stack (composable detectors):
+- Credit card detector with Luhn validation (13-19 digit candidates)
+- Token format detector (e.g., `sk-*`, `ghp_*`, `AKIA*`, `AIza*`, Slack token forms)
+- Contextual keyword detector (`api_key`, `token`, `secret`, `password`, etc.)
+- Prompt-injection marker denylist detector (default on; policy opt-out supported)
+- High-entropy token detector (including printable segments inside binary files)
+- SSN regex detector
 
 Configurable in gauntlet.yml:
 - Additional field paths (JSONPath syntax)
-- Additional regex patterns
+- Additional regex patterns (legacy extension path)
 - Email addresses (off by default)
 
 ## Artifact security
