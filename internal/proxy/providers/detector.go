@@ -6,11 +6,13 @@ import "strings"
 // priority order. More specific rules come first.
 func AllNormalizers() []ProviderNormalizer {
 	return []ProviderNormalizer{
+		// Explicit OpenAI-compatible path match should win before body-heuristic
+		// Anthropic detection to avoid ambiguity on custom gateways.
+		&OpenAICompatibleNormalizer{},
 		&AnthropicNormalizer{},
 		&GoogleNormalizer{},
 		&BedrockNormalizer{},
 		&CohereNormalizer{},
-		&OpenAICompatibleNormalizer{},
 		&UnknownNormalizer{},
 	}
 }

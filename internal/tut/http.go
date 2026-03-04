@@ -23,15 +23,19 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
 	cmd.Dir = config.WorkDir
 
-	// Build environment
-	env := make([]string, 0, len(config.Env))
-	for k, v := range config.Env {
-		env = append(env, k+"="+v)
-	}
-	cmd.Env = env
+	// Build environment.
+	cmd.Env = mergedProcessEnv(config.Env, config.RestrictHostEnv)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+
+	if config.BlockNetworkEgress {
+		wrapped, err := wrapWithEgressBlock(cmd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply egress block to TUT command: %w", err)
+		}
+		cmd = wrapped
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start TUT: %w", err)
@@ -54,15 +58,21 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	}
 
 	deadline := time.Now().Add(startupTimeout)
+	ready := false
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/health")
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				ready = true
 				break
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+	if !ready {
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("TUT did not become healthy at %s/health within %s (stderr: %s)", baseURL, startupTimeout, stderr.String())
 	}
 
 	return &httpHandle{

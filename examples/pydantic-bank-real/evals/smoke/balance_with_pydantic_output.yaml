@@ -1,0 +1,37 @@
+scenario: balance_with_pydantic_output
+description: "Validates output matches real PydanticAI SupportOutput model schema (support_advice, block_card, risk)"
+tags:
+  - smoke
+  - schema-validation
+  - real-repo
+
+input:
+  messages:
+    - role: user
+      content: "How much money do I have?"
+
+world:
+  tools:
+    customer_balance: nominal
+    customer_name: nominal
+  databases:
+    bank_db: standard_customer
+
+assertions:
+  - type: tool_sequence
+    required: ["customer_name", "customer_balance"]
+  - type: output_schema
+    schema:
+      type: object
+      required: ["support_advice", "block_card", "risk"]
+      properties:
+        support_advice:
+          type: string
+          minLength: 1
+        block_card:
+          type: boolean
+        risk:
+          type: integer
+          minimum: 0
+          maximum: 10
+  - type: sensitive_leak

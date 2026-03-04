@@ -21,22 +21,25 @@ func (a *ForbiddenToolAssertion) Evaluate(ctx Context) Result {
 		}
 	}
 
-	// Check against forbidden list from baseline
-	if ctx.Baseline != nil && len(ctx.Baseline.ForbiddenContent) > 0 {
-		// ForbiddenContent can include tool names prefixed with "tool:"
-		for _, forbidden := range ctx.Baseline.ForbiddenContent {
-			if strings.HasPrefix(forbidden, "tool:") {
-				toolName := strings.TrimPrefix(forbidden, "tool:")
-				if calledTools[toolName] {
-					return Result{
-						AssertionType: a.Type(),
-						Passed:        false,
-						Expected:      fmt.Sprintf("tool %s should never be called", toolName),
-						Actual:        fmt.Sprintf("tool %s was called", toolName),
-						Message:       fmt.Sprintf("forbidden tool called: %s", toolName),
-						DocketHint:    "tool.forbidden",
-					}
-				}
+	forbidden := specStringSlice(ctx.Spec, "forbidden")
+	if len(forbidden) == 0 && ctx.Baseline != nil {
+		for _, candidate := range ctx.Baseline.ForbiddenContent {
+			if strings.HasPrefix(candidate, "tool:") {
+				forbidden = append(forbidden, strings.TrimPrefix(candidate, "tool:"))
+			}
+		}
+	}
+
+	// Check against forbidden list
+	for _, toolName := range forbidden {
+		if calledTools[toolName] {
+			return Result{
+				AssertionType: a.Type(),
+				Passed:        false,
+				Expected:      fmt.Sprintf("tool %s should never be called", toolName),
+				Actual:        fmt.Sprintf("tool %s was called", toolName),
+				Message:       fmt.Sprintf("forbidden tool called: %s", toolName),
+				DocketHint:    "tool.forbidden",
 			}
 		}
 	}

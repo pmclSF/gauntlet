@@ -694,6 +694,21 @@ func TestSensitiveLeak_Fail_CreditCard(t *testing.T) {
 	}
 }
 
+func TestSensitiveLeak_Pass_NonLuhnDigits(t *testing.T) {
+	a := &SensitiveLeakAssertion{}
+	ctx := Context{
+		Output: tut.AgentOutput{
+			Raw:    []byte("Order reference 1234 5678 9012 3456"),
+			Parsed: nil,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Errorf("expected pass for non-Luhn digit sequence, got fail: %s", result.Message)
+	}
+}
+
 func TestSensitiveLeak_Fail_SSN(t *testing.T) {
 	a := &SensitiveLeakAssertion{}
 	ctx := Context{
@@ -823,6 +838,137 @@ func TestEvaluateAll_MixedPassFail(t *testing.T) {
 	// forbidden_tool should fail (tool "dangerous" is forbidden)
 	if results[1].Passed {
 		t.Error("forbidden_tool: expected fail, got pass")
+	}
+}
+
+func TestToolSequence_Fail_ForbiddenToolFromSpec(t *testing.T) {
+	a := &ToolSequenceAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{EventType: "tool_call", ToolName: "order_lookup"},
+			{EventType: "tool_call", ToolName: "cancel_order"},
+		},
+		Spec: map[string]interface{}{
+			"required":  []interface{}{"order_lookup"},
+			"forbidden": []interface{}{"cancel_order"},
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected fail when forbidden tool is called")
+	}
+	if result.DocketHint != "tool.forbidden" {
+		t.Errorf("DocketHint = %q, want %q", result.DocketHint, "tool.forbidden")
+	}
+}
+
+func TestToolArgs_InvariantFromSpec_Pass(t *testing.T) {
+	a := &ToolArgsAssertion{}
+	ctx := Context{
+		Input: scenario.Input{
+			Payload: map[string]interface{}{"order_id": "ord-001"},
+		},
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "tool_call",
+				ToolName:  "order_lookup",
+				Args:      json.RawMessage(`{"order_id":"ord-001"}`),
+			},
+		},
+		Spec: map[string]interface{}{
+			"tool":      "order_lookup",
+			"invariant": "args.order_id == input.order_id",
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Fatalf("expected pass, got fail: %s", result.Message)
+	}
+}
+
+func TestToolArgs_InvariantFromSpec_Fail(t *testing.T) {
+	a := &ToolArgsAssertion{}
+	ctx := Context{
+		Input: scenario.Input{
+			Payload: map[string]interface{}{"order_id": "ord-001"},
+		},
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "tool_call",
+				ToolName:  "order_lookup",
+				Args:      json.RawMessage(`{"order_id":"ord-999"}`),
+			},
+		},
+		Spec: map[string]interface{}{
+			"tool":      "order_lookup",
+			"invariant": "args.order_id == input.order_id",
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected fail for invariant mismatch")
+	}
+	if result.DocketHint != "tool.args_invalid" {
+		t.Errorf("DocketHint = %q, want %q", result.DocketHint, "tool.args_invalid")
+	}
+}
+
+func TestRetryCap_UsesSpecMaxRetries(t *testing.T) {
+	a := &RetryCapAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{EventType: "tool_call", ToolName: "order_lookup"},
+			{EventType: "tool_call", ToolName: "order_lookup"},
+		},
+		Spec: map[string]interface{}{
+			"tool":        "order_lookup",
+			"max_retries": 1,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected fail when max_retries from spec is exceeded")
+	}
+}
+
+func TestForbiddenTool_Fail_FromSpec(t *testing.T) {
+	a := &ForbiddenToolAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{EventType: "tool_call", ToolName: "send_email"},
+		},
+		Spec: map[string]interface{}{
+			"forbidden": []interface{}{"send_email"},
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected fail for forbidden tool from scenario spec")
+	}
+}
+
+func TestOutputSchema_UsesScenarioSpecSchema(t *testing.T) {
+	a := &OutputSchemaAssertion{}
+	ctx := Context{
+		Output: tut.AgentOutput{
+			Parsed: map[string]interface{}{"status": "ok"},
+		},
+		Spec: map[string]interface{}{
+			"schema": map[string]interface{}{
+				"type":     "object",
+				"required": []interface{}{"status"},
+			},
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Fatalf("expected pass with inline scenario schema, got: %s", result.Message)
 	}
 }
 

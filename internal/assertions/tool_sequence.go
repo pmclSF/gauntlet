@@ -21,29 +21,46 @@ func (a *ToolSequenceAssertion) Evaluate(ctx Context) Result {
 		}
 	}
 
-	// Check required sequence from baseline
-	if ctx.Baseline != nil && len(ctx.Baseline.ToolSequence) > 0 {
-		required := ctx.Baseline.ToolSequence
+	required := specStringSlice(ctx.Spec, "required")
+	if len(required) == 0 && ctx.Baseline != nil && len(ctx.Baseline.ToolSequence) > 0 {
+		required = ctx.Baseline.ToolSequence
+	}
 
-		// Check that required tools appear in order (not necessarily consecutive)
-		reqIdx := 0
-		for _, tool := range actual {
-			if reqIdx < len(required) && tool == required[reqIdx] {
-				reqIdx++
-			}
+	// Check that required tools appear in order (not necessarily consecutive)
+	reqIdx := 0
+	for _, tool := range actual {
+		if reqIdx < len(required) && tool == required[reqIdx] {
+			reqIdx++
 		}
+	}
+	if reqIdx < len(required) {
+		missing := required[reqIdx:]
+		return Result{
+			AssertionType: a.Type(),
+			Passed:        false,
+			Expected:      fmt.Sprintf("tool sequence %v", required),
+			Actual:        fmt.Sprintf("tool sequence %v (missing: %v)", actual, missing),
+			Message: fmt.Sprintf("tool sequence incomplete: expected %s but %s never called",
+				strings.Join(required, " -> "),
+				strings.Join(missing, ", ")),
+			DocketHint: "planner.premature_finalize",
+		}
+	}
 
-		if reqIdx < len(required) {
-			missing := required[reqIdx:]
+	forbidden := specStringSlice(ctx.Spec, "forbidden")
+	forbiddenSet := make(map[string]bool, len(forbidden))
+	for _, f := range forbidden {
+		forbiddenSet[f] = true
+	}
+	for _, tool := range actual {
+		if forbiddenSet[tool] {
 			return Result{
 				AssertionType: a.Type(),
 				Passed:        false,
-				Expected:      fmt.Sprintf("tool sequence %v", required),
-				Actual:        fmt.Sprintf("tool sequence %v (missing: %v)", actual, missing),
-				Message: fmt.Sprintf("tool sequence incomplete: expected %s but %s never called",
-					strings.Join(required, " -> "),
-					strings.Join(missing, ", ")),
-				DocketHint: "planner.premature_finalize",
+				Expected:      fmt.Sprintf("forbidden tools %v should not be called", forbidden),
+				Actual:        fmt.Sprintf("tool %s was called", tool),
+				Message:       fmt.Sprintf("forbidden tool called: %s", tool),
+				DocketHint:    "tool.forbidden",
 			}
 		}
 	}

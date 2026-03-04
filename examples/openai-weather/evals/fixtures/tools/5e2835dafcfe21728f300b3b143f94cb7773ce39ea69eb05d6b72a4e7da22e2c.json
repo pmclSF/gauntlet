@@ -1,0 +1,16 @@
+{
+  "fixture_id": "5e2835dafcfe21728f300b3b143f94cb7773ce39ea69eb05d6b72a4e7da22e2c",
+  "hash_version": 1,
+  "canonical_hash": "5e2835dafcfe21728f300b3b143f94cb7773ce39ea69eb05d6b72a4e7da22e2c",
+  "tool_name": "get_weather",
+  "canonical_request": {
+    "tool": "get_weather",
+    "args": {"city": "Tokyo"}
+  },
+  "response": {
+    "city": "Tokyo",
+    "temperature_range": "14-20C",
+    "conditions": "Sunny with wind."
+  },
+  "recorded_at": "2026-03-03T00:00:00Z"
+}

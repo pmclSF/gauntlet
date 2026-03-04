@@ -40,12 +40,7 @@ type cliHandle struct {
 func (h *cliHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput, error) {
 	cmd := exec.CommandContext(ctx, h.config.Command, h.config.Args...)
 	cmd.Dir = h.config.WorkDir
-
-	env := make([]string, 0, len(h.config.Env))
-	for k, v := range h.config.Env {
-		env = append(env, k+"="+v)
-	}
-	cmd.Env = env
+	cmd.Env = mergedProcessEnv(h.config.Env, h.config.RestrictHostEnv)
 
 	payload, err := json.Marshal(input)
 	if err != nil {
@@ -56,6 +51,14 @@ func (h *cliHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	if h.config.BlockNetworkEgress {
+		wrapped, err := wrapWithEgressBlock(cmd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply egress block to TUT command: %w", err)
+		}
+		cmd = wrapped
+	}
 
 	start := time.Now()
 	err = cmd.Run()

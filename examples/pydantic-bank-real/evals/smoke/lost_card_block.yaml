@@ -1,0 +1,33 @@
+scenario: lost_card_block
+description: "Customer reports lost card — real PydanticAI SupportOutput validates block_card=true, risk>=5"
+tags:
+  - smoke
+  - security
+  - real-repo
+
+input:
+  messages:
+    - role: user
+      content: "I've lost my debit card!"
+
+world:
+  tools:
+    customer_name: nominal
+  databases:
+    bank_db: standard_customer
+
+assertions:
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response", "block_card", "risk"]
+      properties:
+        block_card:
+          type: boolean
+          const: true
+        risk:
+          type: integer
+          minimum: 5
+  - type: tool_sequence
+    required: ["customer_name"]
+    forbidden: ["customer_balance"]

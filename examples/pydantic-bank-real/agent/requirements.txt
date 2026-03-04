@@ -1,0 +1,2 @@
+pydantic-ai-slim>=0.0.30
+gauntlet-sdk

@@ -1,0 +1,18 @@
+version: 1
+suite: smoke
+description: Smoke test suite for PydanticAI bank support agent
+
+tut:
+  type: cli
+  command: "python3 -m agent.main"
+  working_dir: "."
+  integration_level: best
+
+defaults:
+  budget_ms: 30000
+  mode: recorded
+
+scenarios_dir: evals/smoke
+world_dir: evals/world
+fixtures_dir: evals/fixtures
+baselines_dir: evals/baselines/smoke

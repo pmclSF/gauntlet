@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gauntlet-dev/gauntlet/internal/assertions"
 	"github.com/gauntlet-dev/gauntlet/internal/baseline"
-	"github.com/gauntlet-dev/gauntlet/internal/docket"
 	"github.com/gauntlet-dev/gauntlet/internal/determinism"
+	"github.com/gauntlet-dev/gauntlet/internal/docket"
 	"github.com/gauntlet-dev/gauntlet/internal/output"
 	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 	"github.com/gauntlet-dev/gauntlet/internal/tut"
@@ -23,21 +25,35 @@ import (
 
 // Config holds runner configuration from gauntlet.yml and CLI flags.
 type Config struct {
-	Suite         string
-	ConfigPath    string
-	Mode          string // pr_ci, nightly, local
-	OutputDir     string
-	EvalsDir      string
-	DryRun        bool
-	BudgetMs      int64
+	Suite          string
+	ConfigPath     string
+	Mode           string // pr_ci, nightly, local
+	OutputDir      string
+	EvalsDir       string
+	SuiteDir       string
+	ToolsDir       string
+	DBDir          string
+	BaselineDir    string
+	FixturesDir    string
+	TUTConfig      tut.Config
+	DryRun         bool
+	BudgetMs       int64
 	ScenarioFilter string
 }
 
 // Runner is the main Gauntlet test runner.
 type Runner struct {
-	Config   Config
-	Adapter  tut.Adapter
-	Harness  *determinism.Harness
+	Config  Config
+	Adapter tut.Adapter
+	Harness *determinism.Harness
+}
+
+type scenarioExecution struct {
+	Result    output.ScenarioResult
+	Input     scenario.Input
+	WorldSpec scenario.WorldSpec
+	ToolTrace []tut.TraceEvent
+	PROutput  *tut.AgentOutput
 }
 
 // NewRunner creates a new Runner with the given configuration.
@@ -51,16 +67,40 @@ func NewRunner(cfg Config) *Runner {
 // Run executes all scenarios in the suite and produces output artifacts.
 func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	startTime := time.Now()
+	requiresBlockedEgress := modeRequiresBlockedEgress(r.Config.Mode)
+	egressStatus := EgressUnknown
+	if requiresBlockedEgress {
+		egressStatus = checkEgressBlockedFn()
+		if egressStatus != EgressBlocked {
+			return nil, fmt.Errorf(
+				"mode %q requires blocked network egress, but current status is %s; enforce OS-level egress blocking before running (or use --mode local/nightly)",
+				r.Config.Mode,
+				egressStatus.String(),
+			)
+		}
+	}
 
 	// Determine paths
 	evalsDir := r.Config.EvalsDir
 	if evalsDir == "" {
 		evalsDir = "evals"
 	}
-	suiteDir := filepath.Join(evalsDir, r.Config.Suite)
-	toolsDir := filepath.Join(evalsDir, "world", "tools")
-	dbDir := filepath.Join(evalsDir, "world", "databases")
-	baselineDir := filepath.Join(evalsDir, "baselines")
+	suiteDir := r.Config.SuiteDir
+	if suiteDir == "" {
+		suiteDir = filepath.Join(evalsDir, r.Config.Suite)
+	}
+	toolsDir := r.Config.ToolsDir
+	if toolsDir == "" {
+		toolsDir = filepath.Join(evalsDir, "world", "tools")
+	}
+	dbDir := r.Config.DBDir
+	if dbDir == "" {
+		dbDir = filepath.Join(evalsDir, "world", "databases")
+	}
+	baselineDir := r.Config.BaselineDir
+	if baselineDir == "" {
+		baselineDir = filepath.Join(evalsDir, "baselines")
+	}
 
 	// Load scenarios
 	scenarios, err := scenario.LoadSuite(suiteDir)
@@ -95,15 +135,16 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	}
 
 	result := &output.RunResult{
-		Version:   "1",
-		Suite:     r.Config.Suite,
-		Commit:    getCommit(),
-		StartedAt: startTime,
-		BudgetMs:  budgetMs,
-		Mode:      r.Config.Mode,
-		EgressBlocked: r.Config.Mode == "pr_ci" || r.Config.Mode == "fork_pr",
+		Version:       "1",
+		Suite:         r.Config.Suite,
+		Commit:        getCommit(),
+		StartedAt:     startTime,
+		BudgetMs:      budgetMs,
+		Mode:          r.Config.Mode,
+		EgressBlocked: requiresBlockedEgress && egressStatus == EgressBlocked,
 	}
 
+	var executions []scenarioExecution
 	// Run each scenario
 	for _, s := range scenarios {
 		elapsed := time.Since(startTime).Milliseconds()
@@ -116,7 +157,9 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 			continue
 		}
 
-		sr := r.runScenario(ctx, s, worldState, baselineDir)
+		exec := r.runScenario(ctx, s, worldState, baselineDir, requiresBlockedEgress)
+		sr := exec.Result
+		executions = append(executions, exec)
 		result.Scenarios = append(result.Scenarios, sr)
 
 		switch sr.Status {
@@ -150,20 +193,26 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	}
 
 	// Write artifact bundles for failures
-	for _, sr := range result.Scenarios {
+	for _, exec := range executions {
+		sr := exec.Result
 		if sr.Status == "failed" || sr.Status == "error" {
-			_ = output.WriteArtifactBundle(outputDir, sr.Name, sr, nil, nil, nil, nil, nil)
+			_ = output.WriteArtifactBundle(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, nil, exec.PROutput)
 		}
 	}
 
 	return result, nil
 }
 
-func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *world.State, baselineDir string) output.ScenarioResult {
+func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *world.State, baselineDir string, requiresBlockedEgress bool) scenarioExecution {
 	start := time.Now()
 
 	sr := output.ScenarioResult{
 		Name: s.Name,
+	}
+	exec := scenarioExecution{
+		Result:    sr,
+		Input:     s.Input,
+		WorldSpec: s.World,
 	}
 
 	// Validate variant policy
@@ -175,7 +224,77 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 			Message:       err.Error(),
 		}}
 		sr.DurationMs = time.Since(start).Milliseconds()
-		return sr
+		exec.Result = sr
+		return exec
+	}
+
+	agentOutput := tut.AgentOutput{
+		Parsed: make(map[string]interface{}),
+	}
+	var toolTrace []tut.TraceEvent
+
+	var handle tut.Handle
+	if r.Adapter != nil && !r.Config.DryRun {
+		tutConfig := r.buildTUTConfig(requiresBlockedEgress)
+		dbEnv, cleanupDBs, err := prepareScenarioDatabases(ws, s)
+		if err != nil {
+			sr.Status = "error"
+			sr.Assertions = []assertions.Result{{
+				AssertionType: "db_setup",
+				Passed:        false,
+				Message:       err.Error(),
+			}}
+			sr.DurationMs = time.Since(start).Milliseconds()
+			exec.Result = sr
+			return exec
+		}
+		defer cleanupDBs()
+		for k, v := range dbEnv {
+			tutConfig.Env[k] = v
+		}
+
+		started, err := r.Adapter.Start(ctx, tutConfig)
+		if err != nil {
+			sr.Status = "error"
+			sr.Assertions = []assertions.Result{{
+				AssertionType: "tut_start",
+				Passed:        false,
+				Message:       err.Error(),
+			}}
+			sr.DurationMs = time.Since(start).Milliseconds()
+			exec.Result = sr
+			return exec
+		}
+		handle = started
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = handle.Stop(stopCtx)
+		}()
+	}
+
+	if handle != nil {
+		out, err := handle.Run(ctx, s.Input)
+		if err != nil {
+			sr.Status = "error"
+			sr.Assertions = []assertions.Result{{
+				AssertionType: "tut_execution",
+				Passed:        false,
+				Message:       err.Error(),
+			}}
+			sr.DurationMs = time.Since(start).Milliseconds()
+			exec.Result = sr
+			return exec
+		}
+		if out != nil {
+			agentOutput = *out
+			if agentOutput.Parsed == nil {
+				agentOutput.Parsed = make(map[string]interface{})
+			}
+			exec.PROutput = out
+		}
+		toolTrace = handle.Traces()
+		exec.ToolTrace = toolTrace
 	}
 
 	// Load baseline
@@ -185,7 +304,8 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	assertCtx := assertions.Context{
 		ScenarioName: s.Name,
 		Input:        s.Input,
-		Output:       tut.AgentOutput{Parsed: make(map[string]interface{})},
+		Output:       agentOutput,
+		ToolTrace:    toolTrace,
 		WorldState: assertions.WorldState{
 			Tools: buildToolState(ws, s.World.Tools),
 		},
@@ -193,9 +313,9 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 
 	if bl != nil {
 		assertCtx.Baseline = &assertions.ContractBaseline{
-			ToolSequence:   getToolSequence(bl),
+			ToolSequence:     getToolSequence(bl),
 			ForbiddenContent: getForbiddenContent(bl),
-			RequiredFields:  getRequiredFields(bl),
+			RequiredFields:   getRequiredFields(bl),
 		}
 		if bl.Output != nil {
 			assertCtx.Baseline.OutputSchema = bl.Output.Schema
@@ -205,6 +325,17 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	// In dry-run mode or when no adapter is set, evaluate with fixture data
 	// For the example agent, we simulate the execution by reading fixture responses
 	results := assertions.EvaluateAll(s.Assertions, assertCtx)
+	if handle != nil {
+		warnings := r.Harness.Validate(agentOutput, toolTrace)
+		for _, w := range warnings {
+			results = append(results, assertions.Result{
+				AssertionType: w.Type,
+				Passed:        false,
+				Soft:          true,
+				Message:       w.Message,
+			})
+		}
+	}
 
 	sr.Assertions = results
 	sr.DocketTags, sr.PrimaryTag = docket.Classify(results)
@@ -224,7 +355,8 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 		sr.Culprit = output.ClassifyCulprit(results, s.World.Tools)
 	}
 
-	return sr
+	exec.Result = sr
+	return exec
 }
 
 func buildToolState(ws *world.State, toolStates map[string]string) map[string]assertions.ToolState {
@@ -267,6 +399,130 @@ func getRequiredFields(bl *baseline.Contract) []string {
 	return nil
 }
 
+func (r *Runner) buildTUTConfig(requiresBlockedEgress bool) tut.Config {
+	cfg := r.Config.TUTConfig
+	cfg.Env = cloneStringMap(cfg.Env)
+	if r.Config.Mode == "fork_pr" {
+		cfg.RestrictHostEnv = true
+		cfg.Env = stripSensitiveEnv(cfg.Env)
+	}
+	for _, kv := range r.Harness.Env() {
+		if k, v, ok := splitEnvVar(kv); ok {
+			cfg.Env[k] = v
+		}
+	}
+	cfg.BlockNetworkEgress = requiresBlockedEgress
+	return cfg
+}
+
+func stripSensitiveEnv(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if isSensitiveEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func isSensitiveEnvKey(key string) bool {
+	k := strings.ToUpper(strings.TrimSpace(key))
+	if k == "" {
+		return false
+	}
+	known := map[string]bool{
+		"OPENAI_API_KEY":                 true,
+		"ANTHROPIC_API_KEY":              true,
+		"GOOGLE_API_KEY":                 true,
+		"GOOGLE_APPLICATION_CREDENTIALS": true,
+		"AWS_ACCESS_KEY_ID":              true,
+		"AWS_SECRET_ACCESS_KEY":          true,
+		"AWS_SESSION_TOKEN":              true,
+		"COHERE_API_KEY":                 true,
+	}
+	if known[k] {
+		return true
+	}
+	if strings.Contains(k, "API_KEY") ||
+		strings.Contains(k, "SECRET") ||
+		strings.Contains(k, "TOKEN") ||
+		strings.Contains(k, "PASSWORD") {
+		return true
+	}
+	return false
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func splitEnvVar(kv string) (string, string, bool) {
+	parts := strings.SplitN(kv, "=", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func prepareScenarioDatabases(ws *world.State, s *scenario.Scenario) (map[string]string, func(), error) {
+	if len(s.World.Databases) == 0 {
+		return map[string]string{}, func() {}, nil
+	}
+
+	runDir, err := os.MkdirTemp("", "gauntlet-db-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create DB temp dir: %w", err)
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(runDir)
+	}
+
+	env := make(map[string]string)
+	for dbName, spec := range s.World.Databases {
+		dbDef, ok := ws.Databases[dbName]
+		if !ok {
+			cleanup()
+			return nil, nil, fmt.Errorf("database '%s' referenced by scenario '%s' not found in world definitions", dbName, s.Name)
+		}
+		dbPath, err := world.SeedDB(dbDef, spec.SeedSets, runDir)
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("failed to seed database '%s' for scenario '%s': %w", dbName, s.Name, err)
+		}
+		envName := "GAUNTLET_DB_" + toEnvToken(dbName)
+		env[envName] = sqliteURI(dbPath)
+	}
+
+	return env, cleanup, nil
+}
+
+var nonEnvTokenChars = regexp.MustCompile(`[^A-Za-z0-9]+`)
+
+func toEnvToken(name string) string {
+	normalized := nonEnvTokenChars.ReplaceAllString(strings.ToUpper(name), "_")
+	normalized = strings.Trim(normalized, "_")
+	if normalized == "" {
+		return "DB"
+	}
+	return normalized
+}
+
+func sqliteURI(path string) string {
+	p := filepath.ToSlash(path)
+	if strings.HasPrefix(p, "/") {
+		return "sqlite:////" + strings.TrimPrefix(p, "/")
+	}
+	return "sqlite:///" + p
+}
+
 func getCommit() string {
 	// Try to read git commit
 	data, err := os.ReadFile(".git/HEAD")
@@ -286,6 +542,10 @@ func getCommit() string {
 		return ref[:7]
 	}
 	return "unknown"
+}
+
+func modeRequiresBlockedEgress(mode string) bool {
+	return mode == "pr_ci" || mode == "fork_pr"
 }
 
 // mustMarshal is a helper for JSON marshaling that panics on error.

@@ -1,0 +1,37 @@
+scenario: balance_inquiry
+description: "Happy path — customer asks for balance, agent looks it up and responds with structured output"
+tags:
+  - smoke
+  - happy-path
+
+input:
+  messages:
+    - role: user
+      content: "What is my balance?"
+
+world:
+  tools:
+    customer_balance: nominal
+    customer_name: nominal
+  databases:
+    bank_db: standard_customer
+
+assertions:
+  - type: tool_sequence
+    required: ["customer_name", "customer_balance"]
+  - type: output_schema
+    schema:
+      type: object
+      required: ["response", "support_advice", "block_card", "risk"]
+      properties:
+        response:
+          type: string
+        support_advice:
+          type: string
+        block_card:
+          type: boolean
+        risk:
+          type: integer
+  - type: tool_args_invariant
+    tool: customer_balance
+    invariant: "args.customer_id is not null"

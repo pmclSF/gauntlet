@@ -2,6 +2,7 @@ package tut
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -325,5 +326,49 @@ func TestModelCallEventJSON(t *testing.T) {
 	}
 	if roundtrip.CanonicalHash != "xyz789" {
 		t.Errorf("CanonicalHash: got %q, want %q", roundtrip.CanonicalHash, "xyz789")
+	}
+}
+
+func TestMergedProcessEnv_RestrictHostEnv(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("SECRET_TOKEN", "topsecret")
+
+	env := mergedProcessEnv(map[string]string{"CUSTOM_VAR": "1"}, true)
+	m := make(map[string]string)
+	for _, kv := range env {
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) == 2 {
+			m[parts[0]] = parts[1]
+		}
+	}
+
+	if m["CUSTOM_VAR"] != "1" {
+		t.Fatalf("CUSTOM_VAR = %q, want 1", m["CUSTOM_VAR"])
+	}
+	if _, ok := m["PATH"]; !ok {
+		t.Fatal("PATH should be retained in restricted env")
+	}
+	if _, ok := m["SECRET_TOKEN"]; ok {
+		t.Fatal("SECRET_TOKEN should not be inherited in restricted env")
+	}
+}
+
+func TestMergedProcessEnv_InheritHostEnv(t *testing.T) {
+	t.Setenv("SECRET_TOKEN", "topsecret")
+	env := mergedProcessEnv(map[string]string{"CUSTOM_VAR": "1"}, false)
+
+	m := make(map[string]string)
+	for _, kv := range env {
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) == 2 {
+			m[parts[0]] = parts[1]
+		}
+	}
+
+	if m["CUSTOM_VAR"] != "1" {
+		t.Fatalf("CUSTOM_VAR = %q, want 1", m["CUSTOM_VAR"])
+	}
+	if m["SECRET_TOKEN"] != "topsecret" {
+		t.Fatalf("SECRET_TOKEN = %q, want topsecret", m["SECRET_TOKEN"])
 	}
 }

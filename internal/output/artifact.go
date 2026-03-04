@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/gauntlet-dev/gauntlet/internal/redaction"
 )
 
 // WriteArtifactBundle writes a per-failure artifact bundle for a scenario.
@@ -13,6 +15,7 @@ func WriteArtifactBundle(runDir, scenarioName string, sr ScenarioResult, input, 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
+	redactor := redaction.DefaultRedactor()
 
 	files := map[string]interface{}{
 		"input.json":           input,
@@ -35,14 +38,18 @@ func WriteArtifactBundle(runDir, scenarioName string, sr ScenarioResult, input, 
 		if err != nil {
 			return fmt.Errorf("failed to marshal %s: %w", name, err)
 		}
+		redacted, err := redactor.RedactJSON(jsonData)
+		if err != nil {
+			return fmt.Errorf("failed to redact %s: %w", name, err)
+		}
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, jsonData, 0o644); err != nil {
+		if err := os.WriteFile(path, redacted, 0o644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", name, err)
 		}
 	}
 
 	// Write summary.md
-	summaryMd := generateScenarioSummary(sr)
+	summaryMd := redactor.RedactString(generateScenarioSummary(sr))
 	summaryPath := filepath.Join(dir, "summary.md")
 	if err := os.WriteFile(summaryPath, []byte(summaryMd), 0o644); err != nil {
 		return fmt.Errorf("failed to write summary.md: %w", err)

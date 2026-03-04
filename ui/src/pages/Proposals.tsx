@@ -32,30 +32,30 @@ export function Proposals() {
       {pending.length === 0 ? (
         <p className="text-gray-500">No pending proposals.</p>
       ) : (
-        <div className="space-y-3">
-          {pending.map((proposal) => (
+	        <div className="space-y-3">
+	          {pending.map((proposal) => (
             <div
               key={proposal.id}
               className="bg-white border rounded-lg p-4 flex items-center justify-between shadow-sm"
             >
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium">{proposal.name}</span>
-                  <StatusBadge status={proposal.status} />
-                  {proposal.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <p className="text-sm text-gray-600">{proposal.description}</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Tool: {proposal.tool} | Variant: {proposal.variant} | Source: {proposal.source}
-                </p>
-              </div>
+	                <div className="flex items-center gap-2 mb-1">
+	                  <span className="font-medium">{proposal.name}</span>
+	                  <StatusBadge status={proposal.status} />
+	                  {(proposal.tags || []).map((tag) => (
+	                    <span
+	                      key={tag}
+	                      className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600"
+	                    >
+	                      {tag}
+	                    </span>
+	                  ))}
+	                </div>
+	                <p className="text-sm text-gray-600">{proposal.description}</p>
+	                <p className="text-xs text-gray-400 mt-1">
+	                  {proposal.tool ? `Tool: ${proposal.tool} | Variant: ${proposal.variant}` : `Database: ${proposal.database} | Seed Set: ${proposal.seed_set}`} | Source: {proposal.source}
+	                </p>
+	              </div>
               <div className="flex gap-2 ml-4">
                 <button
                   onClick={() => approveMut.mutate(proposal.id)}

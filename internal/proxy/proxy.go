@@ -58,10 +58,10 @@ type Proxy struct {
 	CA          *CA
 	Redactor    *redaction.Redactor
 
-	server     *http.Server
-	mu         sync.Mutex
-	traces     []TraceEntry
-	listener   net.Listener
+	server   *http.Server
+	mu       sync.Mutex
+	traces   []TraceEntry
+	listener net.Listener
 }
 
 // NewProxy creates a new proxy with default settings.
@@ -90,6 +90,8 @@ func (p *Proxy) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("proxy failed to listen on %s: %w", p.Addr, err)
 	}
+	// Persist the resolved listener address (important when configured with :0).
+	p.Addr = ln.Addr().String()
 	p.listener = ln
 
 	go func() {
@@ -123,8 +125,13 @@ func (p *Proxy) EnvVars(caCertPath string) []string {
 	vars := []string{
 		"HTTP_PROXY=http://" + p.Addr,
 		"HTTPS_PROXY=http://" + p.Addr,
+		"ALL_PROXY=http://" + p.Addr,
 		"http_proxy=http://" + p.Addr,
 		"https_proxy=http://" + p.Addr,
+		"all_proxy=http://" + p.Addr,
+		// Clear no_proxy so localhost/loopback requests are still routed via proxy.
+		"NO_PROXY=",
+		"no_proxy=",
 	}
 	if p.CA != nil {
 		vars = append(vars, p.CA.EnvVars(caCertPath)...)
@@ -407,4 +414,3 @@ func headerMap(h http.Header) map[string]string {
 	}
 	return m
 }
-

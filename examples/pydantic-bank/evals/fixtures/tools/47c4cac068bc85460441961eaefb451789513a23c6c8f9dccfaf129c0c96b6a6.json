@@ -1,0 +1,12 @@
+{
+  "fixture_id": "47c4cac068bc85460441961eaefb451789513a23c6c8f9dccfaf129c0c96b6a6",
+  "hash_version": 1,
+  "canonical_hash": "47c4cac068bc85460441961eaefb451789513a23c6c8f9dccfaf129c0c96b6a6",
+  "tool_name": "customer_balance",
+  "canonical_request": {
+    "tool": "customer_balance",
+    "args": {"customer_id": 456}
+  },
+  "response": "$567.89",
+  "recorded_at": "2026-03-03T00:00:00Z"
+}

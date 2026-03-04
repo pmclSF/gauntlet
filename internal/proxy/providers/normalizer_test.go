@@ -25,6 +25,17 @@ func TestDetectAnthropic(t *testing.T) {
 	}
 }
 
+func TestDetectPriority_OpenAICompatibleWinsOnAmbiguousPath(t *testing.T) {
+	body := []byte(`{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"hello"}]}`)
+	normalizers := AllNormalizers()
+
+	// Ambiguous path contains both Anthropic and OpenAI-compatible markers.
+	n := Detect("gateway.internal", "/v1/messages/chat/completions", body, normalizers)
+	if n.Family() != "openai_compatible" {
+		t.Errorf("expected openai_compatible, got %s", n.Family())
+	}
+}
+
 func TestDetectGoogle(t *testing.T) {
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
 	normalizers := AllNormalizers()
@@ -121,6 +132,50 @@ func TestCanonicalRequestJSON(t *testing.T) {
 
 	if parsed["provider_family"] != "openai_compatible" {
 		t.Error("expected provider_family in JSON output")
+	}
+}
+
+func TestOpenAINormalizeCanonicalConsistency_IgnoresDenylistedFields(t *testing.T) {
+	body1 := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role":"user","content":"hello"}],
+		"request_id": "abc123",
+		"stream": false
+	}`)
+	body2 := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role":"user","content":"hello"}],
+		"request_id": "xyz789",
+		"stream": false
+	}`)
+
+	n := &OpenAICompatibleNormalizer{}
+	c1, err := n.Normalize("api.openai.com", "/v1/chat/completions", nil, body1)
+	if err != nil {
+		t.Fatalf("normalize body1: %v", err)
+	}
+	c2, err := n.Normalize("api.openai.com", "/v1/chat/completions", nil, body2)
+	if err != nil {
+		t.Fatalf("normalize body2: %v", err)
+	}
+
+	j1, err := json.Marshal(c1)
+	if err != nil {
+		t.Fatalf("marshal canonical1: %v", err)
+	}
+	j2, err := json.Marshal(c2)
+	if err != nil {
+		t.Fatalf("marshal canonical2: %v", err)
+	}
+
+	if string(j1) != string(j2) {
+		t.Fatalf("canonical forms differ for request_id-only variation:\n%s\n%s", string(j1), string(j2))
+	}
+	if _, ok := c1.Extra["request_id"]; ok {
+		t.Fatal("request_id should not be preserved in canonical extra fields")
+	}
+	if _, ok := c1.Extra["stream"]; ok {
+		t.Fatal("stream should not be preserved in canonical extra fields")
 	}
 }
 

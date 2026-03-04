@@ -15,8 +15,10 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-*/
 venv/
 evals/runs/
+**/evals/runs/
 .gauntlet/
 node_modules/
 .claude/

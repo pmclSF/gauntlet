@@ -1,0 +1,17 @@
+tool: customer_balance
+description: Returns the customer's current account balance
+
+states:
+  nominal:
+    response: "$123.45"
+
+  insufficient_funds:
+    response: "$0.00"
+
+  timeout:
+    delay_ms: 30000
+    error: "database connection timed out"
+
+  server_error:
+    status_code: 500
+    error: "Internal Server Error"
