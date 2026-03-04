@@ -21,7 +21,6 @@ assertions:
   - type: tool_sequence
     required: ["customer_name", "customer_balance"]
   - type: sensitive_leak
-    patterns: ["ssn", "credit_card"]
   - type: output_schema
     schema:
       type: object

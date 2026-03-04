@@ -1,4 +1,4 @@
-import type { Proposal, IOLibrary, RunResult, BaselineDiff } from './types';
+import type { Proposal, IOLibrary, RunResult, BaselineContract, ScenarioDefinition } from './types';
 
 const BASE = '/api';
 
@@ -34,10 +34,28 @@ export async function getPairs(): Promise<IOLibrary[]> {
   return fetchJSON<IOLibrary[]>('/pairs');
 }
 
-export async function getResults(): Promise<RunResult> {
-  return fetchJSON<RunResult>('/results');
+export async function getResults(): Promise<RunResult | null> {
+  try {
+    const result = await fetchJSON<RunResult>('/results');
+    if (!result || !result.summary) return null;
+    return result;
+  } catch {
+    return null;
+  }
 }
 
-export async function getBaselineDiff(suite: string, scenario: string): Promise<BaselineDiff> {
-  return fetchJSON<BaselineDiff>(`/baselines/diff?suite=${suite}&scenario=${scenario}`);
+export async function getRuns(): Promise<RunResult[]> {
+  return fetchJSON<RunResult[]>('/runs');
+}
+
+export async function getScenarios(suite = 'smoke'): Promise<ScenarioDefinition[]> {
+  return fetchJSON<ScenarioDefinition[]>(`/scenarios?suite=${suite}`);
+}
+
+export async function getBaselines(suite = 'smoke'): Promise<BaselineContract[]> {
+  return fetchJSON<BaselineContract[]>(`/baselines?suite=${suite}`);
+}
+
+export async function getBaselineDiff(suite: string, scenario: string): Promise<BaselineContract> {
+  return fetchJSON<BaselineContract>(`/baselines/diff?suite=${suite}&scenario=${scenario}`);
 }

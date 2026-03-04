@@ -290,6 +290,15 @@ assertions:
     - sensitive_leak
     - output_derivable
 
+tut:
+  adapter: cli          # cli | http | minimal
+  command: python3
+  args: [main.py]
+  # work_dir: .         # defaults to project root
+  # http_port: 8000     # for http adapter
+  # http_path: /run     # for http adapter
+  # startup_ms: 5000    # for http adapter
+
 proxy:
   addr: "localhost:7431"
 

@@ -187,6 +187,25 @@ Model API keys = empty string      Model API keys = real values
 6. Locale freeze — GAUNTLET_LOCALE + GAUNTLET_TIMEZONE injected
 7. Output canonicalization — JSON sorted before comparison
 
+## Auto-discovery pipeline
+
+```
+gauntlet run --suite smoke --auto-discover
+  ├─ 1. Discover: scan tools, DBs, Python decorators → proposals
+  ├─ 2. Load IO pairs (if present) → derived assertions
+  ├─ 3. Load world definitions → available tool states, DB seeds
+  ├─ 4. Materialize: proposals × world state → scenario YAML files
+  ├─ 5. Runner loads generated scenarios from suite dir
+  └─ 6. Normal execution: proxy → TUT → assertions → output
+```
+
+Generated scenarios live in `evals/<suite>/auto_*.yaml` with a
+`# gauntlet:auto-generated` header. Manual scenarios in the same directory
+cause auto-discovery to skip (use `--discover-force` to override).
+
+Hash-based staleness detection: if tool/DB definitions and proposals
+haven't changed, auto scenarios are not regenerated.
+
 ## Self-hosted model handling
 
 For local model servers (Ollama, vLLM, llama.cpp, etc.):

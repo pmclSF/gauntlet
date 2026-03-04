@@ -13,16 +13,17 @@ import (
 
 // Resolved is the normalized runtime configuration derived from a policy file.
 type Resolved struct {
-	BudgetMs    int64
-	RunnerMode  string
-	ModelMode   string
-	SuiteDir    string
-	ToolsDir    string
-	DBDir       string
-	BaselineDir string
-	FixturesDir string
-	ProxyAddr   string
-	TUT         TUTConfig
+	BudgetMs     int64
+	RunnerMode   string
+	ModelMode    string
+	SuiteDir     string
+	ToolsDir     string
+	DBDir        string
+	BaselineDir  string
+	FixturesDir  string
+	ProxyAddr    string
+	TUT          TUTConfig
+	RedactFields []string // field paths like "**.api_key"
 }
 
 // TUTConfig is a policy-derived TUT launch configuration.
@@ -47,6 +48,7 @@ type filePolicy struct {
 	BaselinesDir string                 `yaml:"baselines_dir"`
 	TUT          tutPolicy              `yaml:"tut"`
 	Proxy        proxyPolicy            `yaml:"proxy"`
+	Redaction    redactionPolicy        `yaml:"redaction"`
 }
 
 type suitePolicy struct {
@@ -80,6 +82,11 @@ type tutPolicy struct {
 type proxyPolicy struct {
 	Addr string `yaml:"addr"`
 	Mode string `yaml:"mode"`
+}
+
+type redactionPolicy struct {
+	FieldPaths []string `yaml:"field_paths"`
+	Patterns   []string `yaml:"patterns"`
 }
 
 // Load resolves policy data for the requested suite.
@@ -133,16 +140,17 @@ func Load(path string, suite string) (*Resolved, error) {
 	}
 
 	res := &Resolved{
-		BudgetMs:    budgetMs,
-		RunnerMode:  runnerMode,
-		ModelMode:   modelMode,
-		SuiteDir:    suiteDir,
-		ToolsDir:    filepath.Join(worldDir, "tools"),
-		DBDir:       filepath.Join(worldDir, "databases"),
-		BaselineDir: baselineDir,
-		FixturesDir: fixturesDir,
-		ProxyAddr:   strings.TrimSpace(raw.Proxy.Addr),
-		TUT:         normalizeTUT(baseDir, raw.TUT),
+		BudgetMs:     budgetMs,
+		RunnerMode:   runnerMode,
+		ModelMode:    modelMode,
+		SuiteDir:     suiteDir,
+		ToolsDir:     filepath.Join(worldDir, "tools"),
+		DBDir:        filepath.Join(worldDir, "databases"),
+		BaselineDir:  baselineDir,
+		FixturesDir:  fixturesDir,
+		ProxyAddr:    strings.TrimSpace(raw.Proxy.Addr),
+		TUT:          normalizeTUT(baseDir, raw.TUT),
+		RedactFields: raw.Redaction.FieldPaths,
 	}
 	if res.ProxyAddr == "" {
 		res.ProxyAddr = "localhost:7431"
@@ -277,8 +285,8 @@ func probePathExists(path string) bool {
 	if hasGlobPattern(path) {
 		probe = filepath.Dir(path)
 	}
-	info, err := os.Stat(probe)
-	return err == nil && (info.IsDir() || !info.IsDir())
+	_, err := os.Stat(probe)
+	return err == nil
 }
 
 func hasGlobPattern(path string) bool {

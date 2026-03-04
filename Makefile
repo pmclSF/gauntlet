@@ -1,12 +1,25 @@
-.PHONY: build test test-example test-pydantic-real test-openai-real test-real-repos lint clean proxy-test gen-ca verify-proxy
+.PHONY: build build-ui build-go test test-ui test-example test-pydantic-real test-openai-real test-real-repos lint clean proxy-test gen-ca verify-proxy test-autosuite
 
 BINARY=bin/gauntlet
 
-build:
+build-ui:
+	cd ui && npm ci && npm run build
+	rm -rf cmd/gauntlet/ui_dist
+	cp -r ui/dist cmd/gauntlet/ui_dist
+
+build: build-ui build-go
+
+build-go:
 	go build -o $(BINARY) ./cmd/gauntlet
+
+build-noui:
+	go build -tags noui -o $(BINARY) ./cmd/gauntlet
 
 test:
 	go test ./... -v -race -timeout 120s
+
+test-ui:
+	cd ui && npm ci && npm test
 
 proxy-test:
 	go test ./internal/proxy/... -v -race -run TestProxy
@@ -27,6 +40,9 @@ test-openai-real: build
 	bash tests/test_integration.sh
 
 test-real-repos: test-pydantic-real test-openai-real
+
+test-autosuite:
+	go test -v -run TestEnsureAutoSuite ./internal/discovery/...
 
 lint:
 	golangci-lint run ./... --timeout 5m

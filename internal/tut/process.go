@@ -50,8 +50,8 @@ func wrapWithEgressBlock(cmd *exec.Cmd) (*exec.Cmd, error) {
 }
 
 func wrapDarwin(cmd *exec.Cmd) (*exec.Cmd, error) {
-	// sandbox-exec applies a deny-network policy for the child process.
-	profile := `(version 1)(allow default)(deny network*)`
+	// sandbox-exec denies outbound network except localhost (needed for MITM proxy).
+	profile := `(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))(allow network-outbound (remote ip "127.0.0.1:*"))`
 	args := []string{"-p", profile, cmd.Path}
 	args = append(args, cmd.Args[1:]...)
 	wrapped := exec.Command("sandbox-exec", args...)
@@ -64,10 +64,13 @@ func wrapDarwin(cmd *exec.Cmd) (*exec.Cmd, error) {
 }
 
 func wrapLinux(cmd *exec.Cmd) (*exec.Cmd, error) {
-	// unshare --net executes in an isolated network namespace.
-	args := []string{"--net", cmd.Path}
-	args = append(args, cmd.Args[1:]...)
-	wrapped := exec.Command("unshare", args...)
+	// unshare --net creates an isolated network namespace.
+	// We bring up the loopback interface so the TUT can reach the MITM proxy.
+	shell := fmt.Sprintf("ip link set lo up 2>/dev/null; exec %q", cmd.Path)
+	for _, a := range cmd.Args[1:] {
+		shell += fmt.Sprintf(" %q", a)
+	}
+	wrapped := exec.Command("unshare", "--net", "sh", "-c", shell)
 	wrapped.Dir = cmd.Dir
 	wrapped.Env = cmd.Env
 	wrapped.Stdin = cmd.Stdin

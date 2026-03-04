@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { getPairs } from '../api/client';
 import { StatusBadge } from '../components/StatusBadge';
+import { EmptyState } from '../components/EmptyState';
+import { Loading } from '../components/Loading';
 
 export function Pairs() {
   const { data: libraries, isLoading, error } = useQuery({
@@ -8,7 +10,7 @@ export function Pairs() {
     queryFn: getPairs,
   });
 
-  if (isLoading) return <div className="p-8 text-gray-500">Loading IO pairs...</div>;
+  if (isLoading) return <Loading message="Loading IO pairs..." />;
   if (error) return <div className="p-8 text-red-500">Error loading IO pairs</div>;
 
   return (
@@ -16,7 +18,10 @@ export function Pairs() {
       <h1 className="text-2xl font-bold mb-6">IO Pair Libraries</h1>
 
       {!libraries || libraries.length === 0 ? (
-        <p className="text-gray-500">No IO pair libraries found.</p>
+        <EmptyState
+          title="No IO pair libraries found"
+          description="Create YAML files in `evals/pairs/` to define input/output test pairs."
+        />
       ) : (
         <div className="space-y-6">
           {libraries.map((lib) => (

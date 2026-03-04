@@ -1,15 +1,69 @@
 package tut
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
 	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 )
+
+// rawSDKEvent matches the JSON format emitted by the Python SDK's events.py.
+// Field names differ from TraceEvent (e.g. "type" vs "event_type").
+type rawSDKEvent struct {
+	GauntletEvent bool            `json:"gauntlet_event"`
+	Type          string          `json:"type"`
+	Timestamp     float64         `json:"timestamp"`
+	ToolName      string          `json:"tool_name,omitempty"`
+	Args          json.RawMessage `json:"args,omitempty"`
+	Result        json.RawMessage `json:"result,omitempty"`
+	FixtureHit    bool            `json:"fixture_hit,omitempty"`
+	CanonicalHash string          `json:"canonical_hash,omitempty"`
+	DurationMs    int             `json:"duration_ms,omitempty"`
+	Error         string          `json:"error,omitempty"`
+}
+
+// parseTraceFile reads NDJSON trace events from a file written by the Python SDK.
+func parseTraceFile(path string) ([]TraceEvent, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var events []TraceEvent
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB max line
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var raw rawSDKEvent
+		if err := json.Unmarshal(line, &raw); err != nil {
+			continue // skip malformed lines
+		}
+		if !raw.GauntletEvent {
+			continue // not a gauntlet trace event
+		}
+		sec := int64(raw.Timestamp)
+		nsec := int64((raw.Timestamp - float64(sec)) * 1e9)
+		events = append(events, TraceEvent{
+			EventType:  raw.Type,
+			ToolName:   raw.ToolName,
+			Args:       raw.Args,
+			Response:   raw.Result,
+			Timestamp:  time.Unix(sec, nsec),
+			DurationMs: raw.DurationMs,
+		})
+	}
+	return events, scanner.Err()
+}
 
 // CLIAdapter is the "Good" and "Minimal" integration level adapter.
 // It runs the TUT as a subprocess with JSON on stdin/stdout.
@@ -42,6 +96,16 @@ func (h *cliHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput
 	cmd.Dir = h.config.WorkDir
 	cmd.Env = mergedProcessEnv(h.config.Env, h.config.RestrictHostEnv)
 
+	// Create temp file for trace events so they don't mix with stdout.
+	traceFile, err := os.CreateTemp("", "gauntlet-trace-*.ndjson")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trace file: %w", err)
+	}
+	tracePath := traceFile.Name()
+	traceFile.Close()
+	defer os.Remove(tracePath)
+	cmd.Env = append(cmd.Env, "GAUNTLET_TRACE_FILE="+tracePath)
+
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal input: %w", err)
@@ -71,6 +135,11 @@ func (h *cliHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput
 		} else {
 			return nil, fmt.Errorf("failed to run TUT: %w", err)
 		}
+	}
+
+	// Parse trace events from the trace file.
+	if traces, parseErr := parseTraceFile(tracePath); parseErr == nil {
+		h.traces = traces
 	}
 
 	var parsed map[string]interface{}

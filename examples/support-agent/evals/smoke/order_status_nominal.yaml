@@ -28,4 +28,3 @@ assertions:
         tool_calls:
           type: array
   - type: sensitive_leak
-    patterns: ["credit_card", "ssn"]

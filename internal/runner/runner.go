@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -524,24 +525,11 @@ func sqliteURI(path string) string {
 }
 
 func getCommit() string {
-	// Try to read git commit
-	data, err := os.ReadFile(".git/HEAD")
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "unknown"
 	}
-	ref := string(data)
-	if len(ref) > 5 && ref[:5] == "ref: " {
-		refPath := ".git/" + ref[5:len(ref)-1]
-		data, err = os.ReadFile(refPath)
-		if err != nil {
-			return "unknown"
-		}
-		ref = string(data)
-	}
-	if len(ref) > 7 {
-		return ref[:7]
-	}
-	return "unknown"
+	return strings.TrimSpace(string(out))
 }
 
 func modeRequiresBlockedEgress(mode string) bool {

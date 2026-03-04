@@ -376,3 +376,235 @@ func TestLoad_NoBaselineReturnsNil(t *testing.T) {
 		t.Error("expected nil contract for missing baseline")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// UnmarshalJSON — flat vs nested format
+// ---------------------------------------------------------------------------
+
+func TestUnmarshalJSON_FlatFormat(t *testing.T) {
+	flat := `{
+		"scenario": "order_status_nominal",
+		"suite": "smoke",
+		"tool_sequence": ["order_lookup"],
+		"output_schema": {
+			"type": "object",
+			"required": ["response"]
+		},
+		"required_fields": ["response"],
+		"forbidden_content": ["INTERNAL_ERROR"]
+	}`
+
+	var c Contract
+	if err := json.Unmarshal([]byte(flat), &c); err != nil {
+		t.Fatalf("Unmarshal flat format: %v", err)
+	}
+
+	if c.Scenario != "order_status_nominal" {
+		t.Errorf("Scenario = %q, want order_status_nominal", c.Scenario)
+	}
+	if c.Suite != "smoke" {
+		t.Errorf("Suite = %q, want smoke", c.Suite)
+	}
+
+	// ToolSequence must be parsed from the flat array
+	if c.ToolSequence == nil {
+		t.Fatal("ToolSequence is nil — flat format not parsed")
+	}
+	if len(c.ToolSequence.Required) != 1 || c.ToolSequence.Required[0] != "order_lookup" {
+		t.Errorf("ToolSequence.Required = %v, want [order_lookup]", c.ToolSequence.Required)
+	}
+	if c.ToolSequence.Order != "partial" {
+		t.Errorf("ToolSequence.Order = %q, want partial", c.ToolSequence.Order)
+	}
+
+	// Output must be assembled from flat fields
+	if c.Output == nil {
+		t.Fatal("Output is nil — flat output fields not parsed")
+	}
+	if len(c.Output.RequiredFields) != 1 || c.Output.RequiredFields[0] != "response" {
+		t.Errorf("Output.RequiredFields = %v, want [response]", c.Output.RequiredFields)
+	}
+	if len(c.Output.ForbiddenContent) != 1 || c.Output.ForbiddenContent[0] != "INTERNAL_ERROR" {
+		t.Errorf("Output.ForbiddenContent = %v, want [INTERNAL_ERROR]", c.Output.ForbiddenContent)
+	}
+	if c.Output.Schema == nil {
+		t.Fatal("Output.Schema is nil")
+	}
+}
+
+func TestUnmarshalJSON_NestedFormat(t *testing.T) {
+	nested := `{
+		"baseline_type": "contract",
+		"scenario": "test",
+		"recorded_at": "2025-01-01T00:00:00Z",
+		"commit": "abc123",
+		"tool_sequence": {
+			"required": ["step_a", "step_b"],
+			"order": "strict"
+		},
+		"output": {
+			"required_fields": ["status"],
+			"forbidden_content": ["error"]
+		}
+	}`
+
+	var c Contract
+	if err := json.Unmarshal([]byte(nested), &c); err != nil {
+		t.Fatalf("Unmarshal nested format: %v", err)
+	}
+
+	if c.ToolSequence == nil {
+		t.Fatal("ToolSequence is nil")
+	}
+	if len(c.ToolSequence.Required) != 2 {
+		t.Errorf("ToolSequence.Required len = %d, want 2", len(c.ToolSequence.Required))
+	}
+	if c.ToolSequence.Order != "strict" {
+		t.Errorf("ToolSequence.Order = %q, want strict", c.ToolSequence.Order)
+	}
+
+	if c.Output == nil {
+		t.Fatal("Output is nil")
+	}
+	if len(c.Output.RequiredFields) != 1 || c.Output.RequiredFields[0] != "status" {
+		t.Errorf("Output.RequiredFields = %v, want [status]", c.Output.RequiredFields)
+	}
+}
+
+func TestUnmarshalJSON_FlatEmptyArrays(t *testing.T) {
+	flat := `{
+		"scenario": "test",
+		"tool_sequence": [],
+		"required_fields": ["response"],
+		"forbidden_content": []
+	}`
+
+	var c Contract
+	if err := json.Unmarshal([]byte(flat), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if c.ToolSequence == nil {
+		t.Fatal("ToolSequence is nil for empty array")
+	}
+	if len(c.ToolSequence.Required) != 0 {
+		t.Errorf("ToolSequence.Required = %v, want empty", c.ToolSequence.Required)
+	}
+
+	if c.Output == nil {
+		t.Fatal("Output is nil")
+	}
+	if len(c.Output.RequiredFields) != 1 {
+		t.Errorf("Output.RequiredFields len = %d, want 1", len(c.Output.RequiredFields))
+	}
+}
+
+func TestLoad_FlatFormatFile(t *testing.T) {
+	dir := t.TempDir()
+	suiteDir := filepath.Join(dir, "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	flat := `{
+		"scenario": "order_status_nominal",
+		"suite": "smoke",
+		"tool_sequence": ["order_lookup"],
+		"output_schema": {"type": "object", "required": ["response"]},
+		"required_fields": ["response"],
+		"forbidden_content": []
+	}`
+	if err := os.WriteFile(filepath.Join(suiteDir, "order_status_nominal.json"), []byte(flat), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	c, err := Load(dir, "smoke", "order_status_nominal")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c == nil {
+		t.Fatal("Load returned nil")
+	}
+	if c.ToolSequence == nil {
+		t.Fatal("ToolSequence is nil after Load of flat format")
+	}
+	if len(c.ToolSequence.Required) != 1 || c.ToolSequence.Required[0] != "order_lookup" {
+		t.Errorf("ToolSequence.Required = %v, want [order_lookup]", c.ToolSequence.Required)
+	}
+	if c.Output == nil {
+		t.Fatal("Output is nil after Load of flat format")
+	}
+	if len(c.Output.RequiredFields) != 1 || c.Output.RequiredFields[0] != "response" {
+		t.Errorf("Output.RequiredFields = %v, want [response]", c.Output.RequiredFields)
+	}
+}
+
+func TestCompare_FlatBaseline_ActuallyChecks(t *testing.T) {
+	// This is the critical test: a flat-format baseline loaded via UnmarshalJSON
+	// must produce real mismatches, not vacuously pass.
+	flat := `{
+		"scenario": "test",
+		"tool_sequence": ["order_lookup"],
+		"required_fields": ["response"],
+		"forbidden_content": ["SECRET"]
+	}`
+
+	var c Contract
+	if err := json.Unmarshal([]byte(flat), &c); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	// No tool calls, missing required field, has forbidden content
+	trace := []tut.TraceEvent{}
+	output := tut.AgentOutput{
+		Raw:    []byte(`{"error": "SECRET leaked"}`),
+		Parsed: map[string]interface{}{"error": "SECRET leaked"},
+	}
+
+	mismatches := Compare(&c, trace, output)
+	if len(mismatches) != 3 {
+		t.Errorf("expected 3 mismatches (tool_sequence, required_field, forbidden_content), got %d: %v",
+			len(mismatches), mismatches)
+	}
+}
+
+func TestSaveAndLoad_RoundTrip_WithOutput(t *testing.T) {
+	dir := t.TempDir()
+
+	contract := &Contract{
+		BaselineType: "contract",
+		Scenario:     "round_trip_test",
+		RecordedAt:   "2025-01-01T00:00:00Z",
+		Commit:       "abc123",
+		ToolSequence: &ToolSequenceBaseline{
+			Required: []string{"step_a", "step_b"},
+			Order:    "partial",
+		},
+		Output: &OutputBaseline{
+			Schema:           map[string]interface{}{"type": "object"},
+			RequiredFields:   []string{"status", "message"},
+			ForbiddenContent: []string{"error", "INTERNAL"},
+		},
+	}
+
+	if err := Save(dir, "smoke", contract); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(dir, "smoke", "round_trip_test")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("Load returned nil")
+	}
+	if loaded.Output == nil {
+		t.Fatal("Output is nil after round-trip")
+	}
+	if len(loaded.Output.RequiredFields) != 2 {
+		t.Errorf("Output.RequiredFields len = %d, want 2", len(loaded.Output.RequiredFields))
+	}
+	if len(loaded.Output.ForbiddenContent) != 2 {
+		t.Errorf("Output.ForbiddenContent len = %d, want 2", len(loaded.Output.ForbiddenContent))
+	}
+}
