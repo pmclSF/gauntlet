@@ -13,8 +13,9 @@ proxy-test:
 
 test-example: build
 	cd examples/support-agent && \
-	pip install -r agent/requirements.txt -q && \
-	pip install -e ../../sdk/python/ -q && \
+	python3 -m pip install -r agent/requirements.txt -q && \
+	python3 -m pip install -e ../../sdk/python/ -q && \
+	python3 -m pip install pyyaml pytest -q && \
 	bash tests/test_integration.sh
 
 test-pydantic-real: build

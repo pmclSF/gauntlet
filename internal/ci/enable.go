@@ -165,39 +165,55 @@ func printDBSnippet(framework string) {
 	}
 }
 
-// DetectFramework attempts to detect the Python framework used in the project.
+// DetectFramework attempts to detect the Python agent framework used in the project.
 func DetectFramework(projectDir string) string {
-	// Check requirements.txt
-	reqPath := filepath.Join(projectDir, "requirements.txt")
-	if data, err := os.ReadFile(reqPath); err == nil {
-		content := strings.ToLower(string(data))
-		if strings.Contains(content, "fastapi") {
-			return "fastapi"
-		}
-		if strings.Contains(content, "flask") {
-			return "flask"
-		}
-		if strings.Contains(content, "langchain") {
-			return "langchain"
-		}
+	// Check requirements.txt and pyproject.toml for framework dependencies.
+	// Order matters: more specific frameworks first.
+	depFiles := []string{
+		filepath.Join(projectDir, "requirements.txt"),
+		filepath.Join(projectDir, "pyproject.toml"),
+	}
+	// Ordered from most specific to least specific
+	frameworkPatterns := []struct {
+		pattern string
+		name    string
+	}{
+		{"pydantic-ai", "pydantic-ai"},
+		{"pydantic_ai", "pydantic-ai"},
+		{"openai-agents", "openai-agents"},
+		{"crewai", "crewai"},
+		{"autogen", "autogen"},
+		{"fastapi", "fastapi"},
+		{"flask", "flask"},
+		{"langchain", "langchain"},
 	}
 
-	// Check pyproject.toml
-	pyprojectPath := filepath.Join(projectDir, "pyproject.toml")
-	if data, err := os.ReadFile(pyprojectPath); err == nil {
+	for _, depFile := range depFiles {
+		data, err := os.ReadFile(depFile)
+		if err != nil {
+			continue
+		}
 		content := strings.ToLower(string(data))
-		if strings.Contains(content, "fastapi") {
-			return "fastapi"
-		}
-		if strings.Contains(content, "flask") {
-			return "flask"
-		}
-		if strings.Contains(content, "langchain") {
-			return "langchain"
+		for _, fp := range frameworkPatterns {
+			if strings.Contains(content, fp.pattern) {
+				return fp.name
+			}
 		}
 	}
 
 	return "generic"
+}
+
+// DetectEntryPoint looks for common agent entry point files.
+func DetectEntryPoint(projectDir string) string {
+	candidates := []string{"main.py", "app.py", "agent.py", "run.py"}
+	for _, name := range candidates {
+		path := filepath.Join(projectDir, name)
+		if _, err := os.Stat(path); err == nil {
+			return name
+		}
+	}
+	return ""
 }
 
 const workflowTemplate = `name: Gauntlet

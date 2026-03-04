@@ -2,9 +2,11 @@ export interface Proposal {
   id: string;
   name: string;
   description: string;
-  tool: string;
-  variant: string;
-  tags: string[];
+  tool?: string;
+  variant?: string;
+  database?: string;
+  seed_set?: string;
+  tags?: string[];
   status: 'pending' | 'approved' | 'rejected';
   source: string;
 }

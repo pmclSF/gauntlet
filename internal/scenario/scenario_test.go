@@ -239,6 +239,25 @@ assertions:
 	}
 }
 
+func TestLoadFile_AssertionDescriptionAllowed(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `
+scenario: assertion_description
+input:
+  messages:
+    - role: user
+      content: ping
+assertions:
+  - type: forbidden_tool
+    forbidden: ["send_email"]
+    description: should not invoke send_email
+`
+	path := writeTemp(t, dir, "assertion_description.yaml", yaml)
+	if _, err := LoadFile(path); err != nil {
+		t.Fatalf("LoadFile failed with assertion description: %v", err)
+	}
+}
+
 func TestLoadFile_MissingNameField(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `

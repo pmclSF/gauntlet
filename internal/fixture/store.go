@@ -114,25 +114,35 @@ func (s *Store) PutModelFixture(f *ModelFixture) error {
 }
 
 // GetToolFixture retrieves a tool fixture by tool name and canonical hash.
+// Tries flat path (tools/<hash>.json) first, then namespaced (tools/<toolName>/<hash>.json).
 func (s *Store) GetToolFixture(toolName, hash string) (*ToolFixture, error) {
-	path := filepath.Join(s.BaseDir, "tools", toolName, hash+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	// Primary: flat layout (matches Python SDK convention and existing fixtures)
+	flatPath := filepath.Join(s.BaseDir, "tools", hash+".json")
+	data, err := os.ReadFile(flatPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read tool fixture %s: %w", flatPath, err)
+	}
+	if os.IsNotExist(err) {
+		// Fallback: namespaced layout (tools/<toolName>/<hash>.json)
+		nsPath := filepath.Join(s.BaseDir, "tools", toolName, hash+".json")
+		data, err = os.ReadFile(nsPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to read tool fixture %s: %w", nsPath, err)
 		}
-		return nil, fmt.Errorf("failed to read tool fixture %s: %w", path, err)
 	}
 	var f ToolFixture
 	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("failed to parse tool fixture %s: %w", path, err)
+		return nil, fmt.Errorf("failed to parse tool fixture: %w", err)
 	}
 	return &f, nil
 }
 
-// PutToolFixture stores a tool fixture.
+// PutToolFixture stores a tool fixture using flat layout (tools/<hash>.json).
 func (s *Store) PutToolFixture(f *ToolFixture) error {
-	dir := filepath.Join(s.BaseDir, "tools", f.ToolName)
+	dir := filepath.Join(s.BaseDir, "tools")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create tool fixtures directory: %w", err)
 	}

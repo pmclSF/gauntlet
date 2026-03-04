@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -26,6 +27,9 @@ func SaveProposals(proposals []Proposal, path string) error {
 		Version:   ProposalArtifactVersion,
 		Proposals: proposals,
 	}
+	if artifact.Proposals == nil {
+		artifact.Proposals = []Proposal{}
+	}
 	if err := validateProposalArtifact(artifact); err != nil {
 		return fmt.Errorf("invalid proposals artifact: %w", err)
 	}
@@ -48,6 +52,9 @@ func LoadProposals(path string) ([]Proposal, error) {
 	artifact, err := decodeProposalArtifact(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse proposals file %s: %w", path, err)
+	}
+	if artifact.Proposals == nil {
+		artifact.Proposals = []Proposal{}
 	}
 	if err := validateProposalArtifact(artifact); err != nil {
 		return nil, fmt.Errorf("invalid proposals file %s: %w", path, err)
@@ -112,5 +119,5 @@ func validateProposalArtifact(artifact ProposalArtifact) error {
 		}
 		parts = append(parts, fmt.Sprintf("%s: %s", field, ve.Description()))
 	}
-	return fmt.Errorf(strings.Join(parts, "; "))
+	return errors.New(strings.Join(parts, "; "))
 }
