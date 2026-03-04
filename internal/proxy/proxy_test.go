@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -318,4 +320,179 @@ func TestStopWithNilServer(t *testing.T) {
 	if err != nil {
 		t.Errorf("Stop() with nil server: expected nil error, got %v", err)
 	}
+}
+
+func TestHandleDecryptedConnection_LargeRequest(t *testing.T) {
+	// Verify requests larger than 64KB are handled correctly.
+	// The old implementation used a fixed 65536-byte buffer.
+	tmpDir := t.TempDir()
+	store := fixture.NewStore(tmpDir)
+
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+
+	// Build a request body larger than 64KB
+	largeBody := strings.Repeat("x", 80000)
+	reqStr := fmt.Sprintf("POST /v1/chat/completions HTTP/1.1\r\nHost: api.openai.com\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+		len(largeBody), largeBody)
+
+	client, server := net.Pipe()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.handleDecryptedConnection(server, "api.openai.com")
+	}()
+
+	// Write in a goroutine — net.Pipe is synchronous.
+	go func() {
+		client.Write([]byte(reqStr))
+	}()
+
+	// Read the response — we expect a 502 (fixture miss) rather than a truncation error.
+	// Read in a loop to drain the full response before closing.
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var resp []byte
+	buf := make([]byte, 4096)
+	for {
+		n, err := client.Read(buf)
+		if n > 0 {
+			resp = append(resp, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+
+	// The proxy should have parsed the full request (not truncated) and responded
+	if !strings.Contains(string(resp), "HTTP/1.1") {
+		t.Errorf("expected valid HTTP response, got: %s", string(resp[:min(100, len(resp))]))
+	}
+	<-done
+}
+
+func TestHandleDecryptedConnection_ProperStatusText(t *testing.T) {
+	// Verify response uses correct status text (not hardcoded "OK" for non-200).
+	tmpDir := t.TempDir()
+	store := fixture.NewStore(tmpDir)
+
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+
+	// A recorded-mode request with no fixture will return a 502 error
+	reqStr := "POST /v1/chat/completions HTTP/1.1\r\nHost: api.openai.com\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+
+	client, server := net.Pipe()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.handleDecryptedConnection(server, "api.openai.com")
+	}()
+
+	go func() {
+		client.Write([]byte(reqStr))
+	}()
+
+	// Read the full response then close.
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var resp []byte
+	buf := make([]byte, 4096)
+	for {
+		n, err := client.Read(buf)
+		if n > 0 {
+			resp = append(resp, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	respStr := string(resp)
+
+	// Should contain "502 Bad Gateway", not "502 OK"
+	if strings.Contains(respStr, "502 OK") {
+		t.Error("response should not use hardcoded 'OK' for error status codes")
+	}
+	if !strings.Contains(respStr, "502") {
+		t.Errorf("expected 502 status, got: %s", respStr[:min(100, len(respStr))])
+	}
+	<-done
+}
+
+func TestStripStreamFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantHas  string // substring that should be present
+		wantNot  string // substring that should be absent
+	}{
+		{
+			name:    "strips stream true",
+			input:   `{"model":"gpt-4","stream":true,"messages":[]}`,
+			wantHas: `"model"`,
+			wantNot: `"stream"`,
+		},
+		{
+			name:    "keeps stream false",
+			input:   `{"model":"gpt-4","stream":false,"messages":[]}`,
+			wantHas: `"stream"`,
+		},
+		{
+			name:    "no stream field",
+			input:   `{"model":"gpt-4","messages":[]}`,
+			wantHas: `"model"`,
+		},
+		{
+			name:    "invalid json unchanged",
+			input:   `not json`,
+			wantHas: `not json`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := string(stripStreamFlag([]byte(tt.input)))
+			if tt.wantHas != "" && !strings.Contains(got, tt.wantHas) {
+				t.Errorf("expected %q in result: %s", tt.wantHas, got)
+			}
+			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
+				t.Errorf("did not expect %q in result: %s", tt.wantNot, got)
+			}
+		})
+	}
+}
+
+func TestTLSCertCaching(t *testing.T) {
+	tmpDir := t.TempDir()
+	ca, err := GenerateCA(tmpDir)
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+
+	cert1, err := ca.IssueHostCert("example.com")
+	if err != nil {
+		t.Fatalf("IssueHostCert: %v", err)
+	}
+	cert2, err := ca.IssueHostCert("example.com")
+	if err != nil {
+		t.Fatalf("IssueHostCert second call: %v", err)
+	}
+
+	// Same pointer means it was cached, not regenerated.
+	if cert1 != cert2 {
+		t.Error("expected cached cert to be returned on second call")
+	}
+
+	// Different host should get a different cert.
+	cert3, err := ca.IssueHostCert("other.com")
+	if err != nil {
+		t.Fatalf("IssueHostCert other: %v", err)
+	}
+	if cert1 == cert3 {
+		t.Error("different hosts should get different certs")
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

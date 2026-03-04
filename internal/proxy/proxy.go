@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -47,6 +48,14 @@ type TraceEntry struct {
 	CanonicalHash  string    `json:"canonical_hash"`
 	FixtureHit     bool      `json:"fixture_hit"`
 	DurationMs     int       `json:"duration_ms"`
+}
+
+// directClient bypasses HTTP_PROXY/HTTPS_PROXY env vars to prevent the proxy
+// from routing live/passthrough requests through itself in an infinite loop.
+var directClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: nil,
+	},
 }
 
 // Proxy is the local MITM HTTP/HTTPS proxy.
@@ -185,6 +194,10 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
+		// Force HTTP/1.1 — the proxy parses requests with http.ReadRequest
+		// which only supports HTTP/1.x. Without this, HTTP/2-capable clients
+		// would negotiate h2 and the proxy couldn't parse the binary frames.
+		NextProtos: []string{"http/1.1"},
 	}
 
 	tlsConn := tls.Server(clientConn, tlsConfig)
@@ -201,34 +214,51 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handleDecryptedConnection(conn net.Conn, hostname string) {
 	defer conn.Close()
 
-	// Read HTTP request from TLS connection
-	buf := make([]byte, 65536)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return
+	reader := bufio.NewReader(conn)
+
+	// Loop to support HTTP keep-alive (multiple requests per connection).
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return // EOF or parse error — close the connection
+		}
+
+		body, _ := io.ReadAll(req.Body)
+		req.Body.Close()
+
+		// Process through interception pipeline
+		respBody, statusCode, interceptErr := p.interceptRequest(hostname, req.URL.Path, headerMap(req.Header), body)
+		if interceptErr != nil {
+			errBody := []byte(interceptErr.Error())
+			resp := &http.Response{
+				StatusCode:    http.StatusBadGateway,
+				ProtoMajor:    1,
+				ProtoMinor:    1,
+				Header:        make(http.Header),
+				Body:          io.NopCloser(bytes.NewReader(errBody)),
+				ContentLength: int64(len(errBody)),
+			}
+			resp.Header.Set("Content-Type", "text/plain")
+			resp.Write(conn)
+			return
+		}
+
+		resp := &http.Response{
+			StatusCode:    statusCode,
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Header:        make(http.Header),
+			Body:          io.NopCloser(bytes.NewReader(respBody)),
+			ContentLength: int64(len(respBody)),
+		}
+		resp.Header.Set("Content-Type", "application/json")
+		resp.Write(conn)
+
+		// If the client signaled Connection: close, stop.
+		if req.Close {
+			return
+		}
 	}
-
-	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(buf[:n])))
-	if err != nil {
-		// Not a valid HTTP request, ignore
-		return
-	}
-
-	body, _ := io.ReadAll(req.Body)
-	req.Body.Close()
-
-	// Process through interception pipeline
-	respBody, statusCode, err := p.interceptRequest(hostname, req.URL.Path, headerMap(req.Header), body)
-	if err != nil {
-		errResp := fmt.Sprintf("HTTP/1.1 502 Bad Gateway\r\nContent-Length: %d\r\n\r\n%s", len(err.Error()), err.Error())
-		conn.Write([]byte(errResp))
-		return
-	}
-
-	// Write response back
-	resp := fmt.Sprintf("HTTP/1.1 %d OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
-		statusCode, len(respBody), respBody)
-	conn.Write([]byte(resp))
 }
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +344,10 @@ func (p *Proxy) handleRecorded(canonical *providers.CanonicalRequest, canonicalB
 }
 
 func (p *Proxy) handleLive(hostname, path string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
-	// Forward the original request
+	// Strip stream:true so the upstream API returns a single JSON response
+	// rather than SSE chunks. This lets us record a complete fixture.
+	body = stripStreamFlag(body)
+
 	url := "https://" + hostname + path
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -324,7 +357,7 @@ func (p *Proxy) handleLive(hostname, path string, headers map[string]string, bod
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := directClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("live request failed: %w", err)
 	}
@@ -376,7 +409,7 @@ func (p *Proxy) handlePassthrough(hostname, path string, headers map[string]stri
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := directClient.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -403,6 +436,30 @@ func (p *Proxy) tunnelDirect(clientConn net.Conn, hostname string) {
 
 	go io.Copy(serverConn, clientConn)
 	io.Copy(clientConn, serverConn)
+}
+
+// stripStreamFlag removes "stream":true from a JSON request body so the
+// upstream API returns a single JSON response instead of SSE chunks.
+// Returns the original body unchanged if it's not valid JSON or has no stream field.
+func stripStreamFlag(body []byte) []byte {
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return body
+	}
+	raw, ok := parsed["stream"]
+	if !ok {
+		return body
+	}
+	val := strings.TrimSpace(string(raw))
+	if val != "true" {
+		return body
+	}
+	delete(parsed, "stream")
+	out, err := json.Marshal(parsed)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 func headerMap(h http.Header) map[string]string {

@@ -4,7 +4,12 @@
 package determinism
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -44,4 +49,56 @@ func (h *Harness) Env() []string {
 type Warning struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+}
+
+// directDatetimeImportRE matches "from datetime import datetime" and similar
+// patterns that bypass our module-level patching of datetime.datetime.
+var directDatetimeImportRE = regexp.MustCompile(
+	`^\s*from\s+datetime\s+import\s+.*\b(datetime|date)\b`,
+)
+
+// ScanPythonImportWarnings scans Python files under dirs for imports that
+// bypass Gauntlet's determinism patches (e.g. "from datetime import datetime").
+// Returns warnings but does not block execution.
+func ScanPythonImportWarnings(dirs []string) []Warning {
+	var warnings []Warning
+	seen := map[string]bool{}
+
+	for _, dir := range dirs {
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(path, ".py") {
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+
+			scanner := bufio.NewScanner(f)
+			lineNum := 0
+			for scanner.Scan() {
+				lineNum++
+				line := scanner.Text()
+				if directDatetimeImportRE.MatchString(line) {
+					key := path + ":" + line
+					if seen[key] {
+						continue
+					}
+					seen[key] = true
+					warnings = append(warnings, Warning{
+						Type: "nondeterminism.import",
+						Message: fmt.Sprintf(
+							"%s:%d: direct import '%s' bypasses Gauntlet's datetime patch; use 'import datetime' instead",
+							path, lineNum, strings.TrimSpace(line)),
+					})
+				}
+			}
+			return nil
+		})
+	}
+	return warnings
 }

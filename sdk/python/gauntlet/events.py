@@ -1,9 +1,22 @@
 """Structured event emitters for Gauntlet traces."""
 
 import json
+import os
 import sys
 import time
 from typing import Any, Optional
+
+
+def _write_trace_line(line):
+    """Write a trace line to the trace file if set, else stdout."""
+    trace_path = os.environ.get("GAUNTLET_TRACE_FILE")
+    if trace_path:
+        with open(trace_path, "a") as f:
+            f.write(line + "\n")
+            f.flush()
+    else:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
 
 
 def emit_event(
@@ -16,7 +29,7 @@ def emit_event(
     duration_ms: int = 0,
     error: Optional[str] = None,
 ):
-    """Emit a structured trace event to stdout (JSON-lines protocol)."""
+    """Emit a structured trace event."""
     event = {
         "gauntlet_event": True,
         "type": event_type,
@@ -38,8 +51,7 @@ def emit_event(
         event["error"] = error
 
     line = json.dumps(event, separators=(",", ":"), default=str)
-    sys.stdout.write(line + "\n")
-    sys.stdout.flush()
+    _write_trace_line(line)
 
 
 def emit_tool_call(

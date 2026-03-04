@@ -125,6 +125,16 @@ gauntlet run --suite smoke
 
 In CI, this runs automatically on every PR.
 
+## Quick start with auto-discovery
+
+1. Define your tools in `evals/world/tools/` (or use `gauntlet scaffold`)
+2. Run: `gauntlet run --suite smoke --dry-run`
+3. Auto-discovery generates scenarios automatically
+4. Review generated scenarios in `evals/smoke/auto_*.yaml`
+5. Optionally add IO pairs in `evals/pairs/` for richer test inputs
+6. Record fixtures: `gauntlet record --suite smoke`
+7. Run for real: `gauntlet run --suite smoke`
+
 ## Integration Levels
 
 | Level | What it needs | What Gauntlet checks |

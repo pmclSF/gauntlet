@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,6 +287,42 @@ func newBaselineCmd() *cobra.Command {
 					}
 				}
 
+				// Extract output-related fields from scenario assertions
+				var outputSchema map[string]interface{}
+				var requiredFields []string
+				var forbiddenContent []string
+				if s, ok := scenariosByName[sr.Name]; ok {
+					for _, aSpec := range s.Assertions {
+						if aSpec.Type == "output_schema" {
+							if schemaRaw, ok := aSpec.Raw["schema"]; ok {
+								if m, ok := schemaRaw.(map[string]interface{}); ok {
+									outputSchema = m
+								}
+							}
+						}
+					}
+					if outputSchema != nil {
+						if reqRaw, ok := outputSchema["required"]; ok {
+							if items, ok := reqRaw.([]interface{}); ok {
+								for _, item := range items {
+									if name, ok := item.(string); ok {
+										requiredFields = append(requiredFields, name)
+									}
+								}
+							}
+						}
+					}
+				}
+
+				var output *baseline.OutputBaseline
+				if outputSchema != nil || len(requiredFields) > 0 || len(forbiddenContent) > 0 {
+					output = &baseline.OutputBaseline{
+						Schema:           outputSchema,
+						RequiredFields:   requiredFields,
+						ForbiddenContent: forbiddenContent,
+					}
+				}
+
 				contract := &baseline.Contract{
 					BaselineType: "contract",
 					Scenario:     sr.Name,
@@ -295,6 +332,7 @@ func newBaselineCmd() *cobra.Command {
 						Required: required,
 						Order:    "partial",
 					},
+					Output: output,
 				}
 
 				existing, _ := baseline.Load(baselineDir, suite, sr.Name)
@@ -629,7 +667,16 @@ func newReviewCmd() *cobra.Command {
 		Use:   "review",
 		Short: "Start the Gauntlet review UI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			srv := api.NewServer(addr, evalsDir, staticDir)
+			var staticFS fs.FS
+			if staticDir != "" {
+				staticFS = os.DirFS(staticDir)
+			} else {
+				staticFS = getEmbeddedUI()
+			}
+			if staticFS == nil {
+				fmt.Println("WARN: no UI available. Build with `make build` or use --static.")
+			}
+			srv := api.NewServer(addr, evalsDir, staticFS)
 			fmt.Printf("Gauntlet review UI: http://%s\n", addr)
 			return srv.Start()
 		},
