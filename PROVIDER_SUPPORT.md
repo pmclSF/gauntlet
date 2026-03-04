@@ -78,3 +78,31 @@ Behavior: raw request body stored as fixture with warning.
 | AutoGen | Proxy (automatic) | Good |
 | CrewAI | Proxy (automatic) | Good |
 | Any HTTP-based framework | Proxy (automatic) | Good |
+
+## SDK parity roadmap
+
+Gauntlet uses a versioned capability handshake so the runner can detect adapter
+feature drift deterministically.
+
+### Capability protocol (v1)
+
+- Event type: `sdk_capabilities`
+- Required fields: `protocol_version`, `sdk`, `adapters`
+- Adapter fields: `enabled`, `patched`, optional `reason`
+- Runner behavior:
+  - emits soft `adapter_capabilities` diagnostics for missing handshake,
+    unsupported protocol versions, or enabled-but-unpatched adapters
+
+### Cross-language status matrix
+
+| SDK | Status | Capability protocol | Adapter instrumentation |
+|-----|--------|---------------------|-------------------------|
+| Python | Implemented | v1 | OpenAI, Anthropic, LangChain |
+| JS/TS | Planned | v1 target | Planned parity with Python adapters |
+| Go | Planned | v1 target | Planned transport/callback parity |
+
+### Near-term milestones
+
+1. Implement JS/TS `connect()` parity with `sdk_capabilities` emission.
+2. Implement Go SDK `connect()` parity with `sdk_capabilities` emission.
+3. Add cross-SDK conformance tests validating identical v1 capability payload semantics.

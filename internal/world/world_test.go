@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 	"gopkg.in/yaml.v3"
 )
 
@@ -118,7 +119,7 @@ func TestValidateVariantPolicy_AllNominal(t *testing.T) {
 		"refund_processor": "nominal",
 		"inventory":        "nominal",
 	}
-	if err := ValidateVariantPolicy(tools, false); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
 		t.Errorf("all nominal should pass: %v", err)
 	}
 }
@@ -129,7 +130,7 @@ func TestValidateVariantPolicy_SingleFault(t *testing.T) {
 		"refund_processor": "timeout",
 		"inventory":        "nominal",
 	}
-	if err := ValidateVariantPolicy(tools, false); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
 		t.Errorf("single fault should pass: %v", err)
 	}
 }
@@ -140,7 +141,7 @@ func TestValidateVariantPolicy_MultiFaultRejected(t *testing.T) {
 		"refund_processor": "server_error",
 		"inventory":        "nominal",
 	}
-	err := ValidateVariantPolicy(tools, false)
+	err := ValidateVariantPolicy(tools, nil, false)
 	if err == nil {
 		t.Fatal("expected error for multi-fault without chaos")
 	}
@@ -159,19 +160,19 @@ func TestValidateVariantPolicy_MultiFaultAllowedWithChaos(t *testing.T) {
 		"refund_processor": "server_error",
 		"inventory":        "malformed_response",
 	}
-	if err := ValidateVariantPolicy(tools, true); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
 		t.Errorf("multi-fault with chaos=true should pass: %v", err)
 	}
 }
 
 func TestValidateVariantPolicy_EmptyTools(t *testing.T) {
-	if err := ValidateVariantPolicy(map[string]string{}, false); err != nil {
+	if err := ValidateVariantPolicy(map[string]string{}, nil, false); err != nil {
 		t.Errorf("empty tools should pass: %v", err)
 	}
 }
 
 func TestValidateVariantPolicy_NilTools(t *testing.T) {
-	if err := ValidateVariantPolicy(nil, false); err != nil {
+	if err := ValidateVariantPolicy(nil, nil, false); err != nil {
 		t.Errorf("nil tools should pass: %v", err)
 	}
 }
@@ -182,7 +183,7 @@ func TestValidateVariantPolicy_AllNonNominalChaos(t *testing.T) {
 		"b": "server_error",
 		"c": "malformed_response",
 	}
-	if err := ValidateVariantPolicy(tools, true); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
 		t.Errorf("all non-nominal with chaos=true should pass: %v", err)
 	}
 }
@@ -202,7 +203,7 @@ func TestValidateVariantPolicy_MultiFaultChaosLogsWarning(t *testing.T) {
 		"order_lookup":     "timeout",
 		"refund_processor": "server_error",
 	}
-	if err := ValidateVariantPolicy(tools, true); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	msg := buf.String()
@@ -215,8 +216,46 @@ func TestValidateVariantPolicy_SingleToolNonNominal(t *testing.T) {
 	tools := map[string]string{
 		"solo": "server_error",
 	}
-	if err := ValidateVariantPolicy(tools, false); err != nil {
+	if err := ValidateVariantPolicy(tools, nil, false); err != nil {
 		t.Errorf("single tool non-nominal should pass single-fault: %v", err)
+	}
+}
+
+func TestValidateVariantPolicy_StandardDatabaseSeedIsNominal(t *testing.T) {
+	databases := map[string]scenario.DBSpec{
+		"orders_db": {SeedSets: []string{"standard_order"}},
+	}
+	if err := ValidateVariantPolicy(nil, databases, false); err != nil {
+		t.Fatalf("standard seed set should be treated as nominal: %v", err)
+	}
+}
+
+func TestValidateVariantPolicy_OneDatabaseFaultAllowed(t *testing.T) {
+	databases := map[string]scenario.DBSpec{
+		"orders_db": {SeedSets: []string{"conflicting_state"}},
+	}
+	if err := ValidateVariantPolicy(nil, databases, false); err != nil {
+		t.Fatalf("single database fault should pass: %v", err)
+	}
+}
+
+func TestValidateVariantPolicy_ToolAndDatabaseFaultRejected(t *testing.T) {
+	tools := map[string]string{
+		"order_lookup": "timeout",
+	}
+	databases := map[string]scenario.DBSpec{
+		"orders_db": {SeedSets: []string{"conflicting_state"}},
+	}
+	err := ValidateVariantPolicy(tools, databases, false)
+	if err == nil {
+		t.Fatal("expected error when tool + database are both non-nominal")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "tool order_lookup") {
+		t.Fatalf("expected tool detail in error, got: %s", msg)
+	}
+	if !strings.Contains(msg, "db orders_db") {
+		t.Fatalf("expected db detail in error, got: %s", msg)
 	}
 }
 

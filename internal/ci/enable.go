@@ -251,10 +251,31 @@ jobs:
           pip install -r requirements.txt
           pip install gauntlet-sdk
 
+      - name: Fetch PR base ref
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}"
+
+      - name: Enforce baseline approval policy
+        if: github.event_name == 'pull_request'
+        run: |
+          gauntlet check-baseline-approval \
+            --base-ref "origin/${{ github.base_ref }}" \
+            --head-ref "HEAD" \
+            --baseline-dir "evals/baselines" \
+            --required-label "gauntlet/baseline-approved"
+
       - name: Run Gauntlet smoke suite
         run: gauntlet run --suite smoke --mode pr_ci
         env:
           GAUNTLET_MODEL_MODE: recorded
+
+      - name: Scan artifacts for sensitive content
+        if: always()
+        run: gauntlet scan-artifacts --dir evals
+
+      - name: Sign evidence bundle
+        if: always()
+        run: gauntlet sign-artifacts --dir evals/runs
 
       - name: Upload results
         if: always()
@@ -298,11 +319,21 @@ tut:
   # http_port: 8000     # for http adapter
   # http_path: /run     # for http adapter
   # startup_ms: 5000    # for http adapter
+  # resource_limits:    # per-scenario process limits
+  #   cpu_seconds: 10
+  #   memory_mb: 512
+  #   open_files: 1024
+  # guardrails:         # linux-only hostile-payload hardening
+  #   hostile_payload: true
+  #   max_processes: 64
 
 proxy:
   addr: "localhost:7431"
 
 redaction:
+  # default true: detect prompt-injection marker strings in recorded artifacts.
+  # set false only if your suite intentionally stores adversarial prompt text.
+  # prompt_injection_denylist: true
   field_paths:
     - "**.api_key"
     - "**.password"

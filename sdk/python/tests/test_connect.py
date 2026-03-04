@@ -83,3 +83,76 @@ def test_connect_forces_proxy_env_for_loopback(monkeypatch):
     assert connect_module.os.environ.get("no_proxy") == ""
 
     connect_module.disconnect()
+
+
+def test_connect_emits_sdk_capability_report(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+
+    connect_module = _reload_connect_module()
+    events_module = importlib.import_module("gauntlet.events")
+
+    captured = []
+    monkeypatch.setattr(
+        connect_module,
+        "_install_adapter_instrumentation",
+        lambda: {
+            "openai": {"enabled": True, "patched": False, "reason": "openai_not_installed"}
+        },
+    )
+    monkeypatch.setattr(
+        events_module,
+        "emit_event",
+        lambda event_type, **kwargs: captured.append((event_type, kwargs)),
+    )
+
+    connect_module.connect()
+
+    assert connect_module._connected is True
+    assert captured
+    event_type, payload = captured[0]
+    assert event_type == "sdk_capabilities"
+    report = payload["result"]
+    assert report["protocol_version"] == 1
+    assert report["sdk"] == "gauntlet-python"
+    assert report["runtime"].startswith("python")
+    assert report["adapters"]["openai"]["reason"] == "openai_not_installed"
+
+    connect_module.disconnect()
+
+
+def test_connect_emits_determinism_env_report(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("GAUNTLET_FREEZE_TIME", "2025-01-15T10:00:00Z")
+    monkeypatch.setenv("GAUNTLET_LOCALE", "C")
+    monkeypatch.setenv("GAUNTLET_TIMEZONE", "UTC")
+
+    connect_module = _reload_connect_module()
+    events_module = importlib.import_module("gauntlet.events")
+
+    captured = []
+    monkeypatch.setattr(
+        connect_module,
+        "_install_adapter_instrumentation",
+        lambda: {"openai": {"enabled": True, "patched": True}},
+    )
+    monkeypatch.setattr(
+        events_module,
+        "emit_event",
+        lambda event_type, **kwargs: captured.append((event_type, kwargs)),
+    )
+
+    connect_module.connect()
+
+    determinism_events = [payload for event_type, payload in captured if event_type == "determinism_env"]
+    assert determinism_events
+    report = determinism_events[-1]["result"]
+    assert report["language"] == "python"
+    assert report["requested_timezone"] == "UTC"
+    assert report["effective_timezone"] == "UTC"
+    assert report["timezone_applied"] is True
+    assert report["requested_locale"] == "C"
+    assert report["locale_applied"] is True
+    assert report["time_patched"] is True
+    assert report["requested_freeze_time"] == "2025-01-15T10:00:00Z"
+
+    connect_module.disconnect()

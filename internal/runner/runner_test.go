@@ -144,13 +144,14 @@ func TestInCIContextNotCI(t *testing.T) {
 
 func TestNewRunner(t *testing.T) {
 	cfg := Config{
-		Suite:      "smoke",
-		ConfigPath: "/tmp/gauntlet.yml",
-		Mode:       "local",
-		OutputDir:  "/tmp/output",
-		EvalsDir:   "/tmp/evals",
-		DryRun:     true,
-		BudgetMs:   30000,
+		Suite:            "smoke",
+		ConfigPath:       "/tmp/gauntlet.yml",
+		Mode:             "local",
+		OutputDir:        "/tmp/output",
+		EvalsDir:         "/tmp/evals",
+		DryRun:           true,
+		BudgetMs:         30000,
+		ScenarioBudgetMs: 15000,
 	}
 
 	r := NewRunner(cfg)
@@ -163,6 +164,9 @@ func TestNewRunner(t *testing.T) {
 	}
 	if r.Config.BudgetMs != 30000 {
 		t.Errorf("Config.BudgetMs: got %d, want 30000", r.Config.BudgetMs)
+	}
+	if r.Config.ScenarioBudgetMs != 15000 {
+		t.Errorf("Config.ScenarioBudgetMs: got %d, want 15000", r.Config.ScenarioBudgetMs)
 	}
 	if !r.Config.DryRun {
 		t.Error("Config.DryRun: expected true")
@@ -197,6 +201,9 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.BudgetMs != 0 {
 		t.Errorf("default BudgetMs should be 0, got %d", cfg.BudgetMs)
+	}
+	if cfg.ScenarioBudgetMs != 0 {
+		t.Errorf("default ScenarioBudgetMs should be 0, got %d", cfg.ScenarioBudgetMs)
 	}
 	if cfg.DryRun {
 		t.Error("default DryRun should be false")
@@ -318,6 +325,103 @@ func TestRunnerRun_PRModeSetsTUTEgressBlock(t *testing.T) {
 	}
 }
 
+func TestRunnerRun_AssertionPolicyHardGateOverridesSoftAssertion(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", `scenario: sensitive_output
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: sensitive_leak
+`)
+
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte("card 4111 1111 1111 1111"),
+				Parsed: map[string]interface{}{"response": "card 4111 1111 1111 1111"},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:       "smoke",
+		EvalsDir:    evalsDir,
+		OutputDir:   filepath.Join(t.TempDir(), "runs"),
+		Mode:        "local",
+		BudgetMs:    10000,
+		TUTConfig:   tut.Config{Command: "agent"},
+		HardGates:   map[string]bool{"sensitive_leak": true},
+		SoftSignals: nil,
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Failed != 1 {
+		t.Fatalf("failed summary = %d, want 1", result.Summary.Failed)
+	}
+	if got := result.Scenarios[0].Status; got != "failed" {
+		t.Fatalf("scenario status = %q, want failed", got)
+	}
+	if got := result.Scenarios[0].Assertions[0].Soft; got {
+		t.Fatalf("sensitive_leak should be forced hard gate by policy")
+	}
+}
+
+func TestRunnerRun_AssertionPolicySoftSignalOverridesHardAssertion(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", `scenario: output_schema_softened
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: output_schema
+    schema:
+      type: object
+      required: ["must_exist"]
+`)
+
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"response":"ok"}`),
+				Parsed: map[string]interface{}{"response": "ok"},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:       "smoke",
+		EvalsDir:    evalsDir,
+		OutputDir:   filepath.Join(t.TempDir(), "runs"),
+		Mode:        "local",
+		BudgetMs:    10000,
+		TUTConfig:   tut.Config{Command: "agent"},
+		SoftSignals: map[string]bool{"output_schema": true},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Passed != 1 {
+		t.Fatalf("passed summary = %d, want 1", result.Summary.Passed)
+	}
+	if got := result.Scenarios[0].Status; got != "passed" {
+		t.Fatalf("scenario status = %q, want passed", got)
+	}
+	if got := result.Scenarios[0].Assertions[0].Soft; !got {
+		t.Fatalf("output_schema should be forced soft signal by policy")
+	}
+	if got := result.Scenarios[0].Assertions[0].Passed; got {
+		t.Fatalf("expected assertion itself to fail, but be non-blocking")
+	}
+}
+
 func TestRunnerRun_AdapterExecutionErrorMarksScenarioError(t *testing.T) {
 	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: broken_agent\ninput:\n  messages:\n    - role: user\n      content: hello\n")
 
@@ -350,11 +454,95 @@ func TestRunnerRun_AdapterExecutionErrorMarksScenarioError(t *testing.T) {
 	if got := result.Scenarios[0].Status; got != "error" {
 		t.Fatalf("scenario status = %q, want %q", got, "error")
 	}
+	if got := result.Scenarios[0].FailureCategory; got != "infra_failure" {
+		t.Fatalf("failure category = %q, want infra_failure", got)
+	}
 	if len(result.Scenarios[0].Assertions) == 0 {
 		t.Fatal("expected tut_execution assertion on adapter error")
 	}
 	if got := result.Scenarios[0].Assertions[0].AssertionType; got != "tut_execution" {
 		t.Fatalf("assertion type = %q, want %q", got, "tut_execution")
+	}
+}
+
+func TestRunnerRun_ScenarioBudgetTimeoutMarksTimeoutCategory(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: slow_agent\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			runDelay: 200 * time.Millisecond,
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:            "smoke",
+		EvalsDir:         evalsDir,
+		OutputDir:        filepath.Join(t.TempDir(), "runs"),
+		Mode:             "local",
+		BudgetMs:         5000,
+		ScenarioBudgetMs: 20,
+		TUTConfig:        tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Error != 1 {
+		t.Fatalf("error summary = %d, want 1", result.Summary.Error)
+	}
+	sr := result.Scenarios[0]
+	if sr.Status != "error" {
+		t.Fatalf("status = %q, want error", sr.Status)
+	}
+	if sr.FailureCategory != "timeout" {
+		t.Fatalf("failure category = %q, want timeout", sr.FailureCategory)
+	}
+	if sr.BudgetMs != 20 {
+		t.Fatalf("scenario budget = %d, want 20", sr.BudgetMs)
+	}
+	if len(sr.Assertions) == 0 || sr.Assertions[0].AssertionType != "scenario_timeout" {
+		t.Fatalf("expected scenario_timeout assertion, got %+v", sr.Assertions)
+	}
+}
+
+func TestRunnerRun_PassedWithNondeterminismWarningCategory(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: nondeterminism_warning\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"timestamp":"2024-01-01T00:00:00"}`),
+				Parsed: map[string]interface{}{"timestamp": "2024-01-01T00:00:00"},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Passed != 1 {
+		t.Fatalf("passed summary = %d, want 1", result.Summary.Passed)
+	}
+	sr := result.Scenarios[0]
+	if sr.Status != "passed" {
+		t.Fatalf("status = %q, want passed", sr.Status)
+	}
+	if sr.FailureCategory != "nondeterminism_warning" {
+		t.Fatalf("failure category = %q, want nondeterminism_warning", sr.FailureCategory)
+	}
+	if len(sr.Assertions) == 0 || !strings.HasPrefix(sr.Assertions[0].AssertionType, "nondeterminism.") {
+		t.Fatalf("expected nondeterminism assertion, got %+v", sr.Assertions)
 	}
 }
 
@@ -489,6 +677,238 @@ func TestBuildTUTConfig_LocalKeepsEnvAndHostInheritance(t *testing.T) {
 	}
 }
 
+func TestAdapterCapabilityDiagnostics_WarnsWhenNegotiationMissing(t *testing.T) {
+	r := NewRunner(Config{})
+	r.Adapter = &fakeAdapter{level: tut.LevelGood}
+
+	diagnostics := r.adapterCapabilityDiagnostics(&fakeHandle{}, nil)
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d", len(diagnostics))
+	}
+	d := diagnostics[0]
+	if d.AssertionType != "adapter_capabilities" {
+		t.Fatalf("assertion type = %q", d.AssertionType)
+	}
+	if !d.Soft || d.Passed {
+		t.Fatalf("expected soft failing diagnostic, got %+v", d)
+	}
+	if !strings.Contains(d.Message, "capability negotiation unavailable") {
+		t.Fatalf("unexpected diagnostic message: %s", d.Message)
+	}
+}
+
+func TestAdapterCapabilityDiagnostics_WarnsOnUnpatchedAdapter(t *testing.T) {
+	r := NewRunner(Config{})
+	r.Adapter = &fakeAdapter{level: tut.LevelGood}
+	handle := &fakeHandle{
+		capabilities: &tut.SDKCapabilities{
+			ProtocolVersion: tut.CapabilityProtocolV1,
+			SDK:             "gauntlet-python",
+			Adapters: map[string]tut.SDKAdapterCapability{
+				"openai":    {Enabled: true, Patched: false, Reason: "openai_not_installed"},
+				"langchain": {Enabled: true, Patched: true},
+			},
+		},
+	}
+
+	diagnostics := r.adapterCapabilityDiagnostics(handle, nil)
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d", len(diagnostics))
+	}
+	if !strings.Contains(diagnostics[0].Message, "adapter openai missing instrumentation") {
+		t.Fatalf("unexpected message: %s", diagnostics[0].Message)
+	}
+}
+
+func TestAdapterCapabilityDiagnostics_SkipsForMinimalIntegration(t *testing.T) {
+	r := NewRunner(Config{})
+	r.Adapter = &fakeAdapter{level: tut.LevelMinimal}
+
+	diagnostics := r.adapterCapabilityDiagnostics(&fakeHandle{}, nil)
+	if len(diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics, got %d", len(diagnostics))
+	}
+}
+
+func TestRunnerRun_DeterminismEnvVerifiedNoWarning(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: env_verified\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	adapter := &fakeAdapter{
+		level: tut.LevelGood,
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"ok":true}`),
+				Parsed: map[string]interface{}{"ok": true},
+			},
+			capabilities: &tut.SDKCapabilities{
+				ProtocolVersion: tut.CapabilityProtocolV1,
+				SDK:             "gauntlet-python",
+				Adapters: map[string]tut.SDKAdapterCapability{
+					"openai": {Enabled: true, Patched: true},
+				},
+			},
+			traces: []tut.TraceEvent{
+				{
+					EventType: "determinism_env",
+					DeterminismEnv: &tut.DeterminismEnvReport{
+						Language:            "python",
+						Runtime:             "python3.11",
+						RequestedFreezeTime: "2025-01-15T10:00:00Z",
+						TimePatched:         true,
+						RequestedTimezone:   "UTC",
+						EffectiveTimezone:   "UTC",
+						TimezoneApplied:     true,
+						RequestedLocale:     "en_US.UTF-8",
+						EffectiveLocale:     "en_US.UTF-8",
+						LocaleApplied:       true,
+					},
+				},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Passed != 1 {
+		t.Fatalf("passed summary = %d, want 1", result.Summary.Passed)
+	}
+	for _, a := range result.Scenarios[0].Assertions {
+		if a.AssertionType == "nondeterminism.env" {
+			t.Fatalf("unexpected nondeterminism.env warning: %+v", a)
+		}
+	}
+}
+
+func TestRunnerRun_DeterminismEnvMismatchWarns(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: env_mismatch\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	adapter := &fakeAdapter{
+		level: tut.LevelGood,
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"ok":true}`),
+				Parsed: map[string]interface{}{"ok": true},
+			},
+			capabilities: &tut.SDKCapabilities{
+				ProtocolVersion: tut.CapabilityProtocolV1,
+				SDK:             "gauntlet-python",
+				Adapters: map[string]tut.SDKAdapterCapability{
+					"openai": {Enabled: true, Patched: true},
+				},
+			},
+			traces: []tut.TraceEvent{
+				{
+					EventType: "determinism_env",
+					DeterminismEnv: &tut.DeterminismEnvReport{
+						Language:            "python",
+						Runtime:             "python3.11",
+						RequestedFreezeTime: "2025-01-15T10:00:00Z",
+						TimePatched:         false,
+						RequestedTimezone:   "UTC",
+						EffectiveTimezone:   "America/Los_Angeles",
+						TimezoneApplied:     false,
+						RequestedLocale:     "en_US.UTF-8",
+						EffectiveLocale:     "C",
+						LocaleApplied:       false,
+					},
+				},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Passed != 1 {
+		t.Fatalf("passed summary = %d, want 1", result.Summary.Passed)
+	}
+	if result.Scenarios[0].FailureCategory != "nondeterminism_warning" {
+		t.Fatalf("failure category = %q, want nondeterminism_warning", result.Scenarios[0].FailureCategory)
+	}
+	found := false
+	for _, a := range result.Scenarios[0].Assertions {
+		if a.AssertionType == "nondeterminism.env" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected nondeterminism.env warning, got %+v", result.Scenarios[0].Assertions)
+	}
+}
+
+func TestRunnerRun_NonPythonMissingDeterminismReportWarns(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: non_python_env\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	adapter := &fakeAdapter{
+		level: tut.LevelGood,
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"ok":true}`),
+				Parsed: map[string]interface{}{"ok": true},
+			},
+			capabilities: &tut.SDKCapabilities{
+				ProtocolVersion: tut.CapabilityProtocolV1,
+				SDK:             "gauntlet-js",
+				Adapters: map[string]tut.SDKAdapterCapability{
+					"openai": {Enabled: true, Patched: true},
+				},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Summary.Passed != 1 {
+		t.Fatalf("passed summary = %d, want 1", result.Summary.Passed)
+	}
+	if result.Scenarios[0].FailureCategory != "nondeterminism_warning" {
+		t.Fatalf("failure category = %q, want nondeterminism_warning", result.Scenarios[0].FailureCategory)
+	}
+	found := false
+	for _, a := range result.Scenarios[0].Assertions {
+		if a.AssertionType == "nondeterminism.env" && strings.Contains(a.Message, "gauntlet-js") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected non-python determinism warning, got %+v", result.Scenarios[0].Assertions)
+	}
+}
+
 func writeSingleScenarioSuite(t *testing.T, suite, scenarioYAML string) string {
 	t.Helper()
 	evalsDir := t.TempDir()
@@ -508,9 +928,13 @@ type fakeAdapter struct {
 	startCalls int
 	lastConfig tut.Config
 	configs    []tut.Config
+	level      tut.IntegrationLevel
 }
 
 func (a *fakeAdapter) Level() tut.IntegrationLevel {
+	if a.level != "" {
+		return a.level
+	}
 	return tut.LevelMinimal
 }
 
@@ -530,16 +954,25 @@ func (a *fakeAdapter) Start(ctx context.Context, config tut.Config) (tut.Handle,
 }
 
 type fakeHandle struct {
-	output    *tut.AgentOutput
-	traces    []tut.TraceEvent
-	runErr    error
-	stopErr   error
-	runCalls  int
-	stopCalls int
+	output       *tut.AgentOutput
+	traces       []tut.TraceEvent
+	capabilities *tut.SDKCapabilities
+	runDelay     time.Duration
+	runErr       error
+	stopErr      error
+	runCalls     int
+	stopCalls    int
 }
 
 func (h *fakeHandle) Run(ctx context.Context, input scenario.Input) (*tut.AgentOutput, error) {
 	h.runCalls++
+	if h.runDelay > 0 {
+		select {
+		case <-time.After(h.runDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if h.runErr != nil {
 		return nil, h.runErr
 	}
@@ -551,6 +984,10 @@ func (h *fakeHandle) Run(ctx context.Context, input scenario.Input) (*tut.AgentO
 
 func (h *fakeHandle) Traces() []tut.TraceEvent {
 	return h.traces
+}
+
+func (h *fakeHandle) Capabilities() *tut.SDKCapabilities {
+	return h.capabilities
 }
 
 func (h *fakeHandle) Stop(ctx context.Context) error {

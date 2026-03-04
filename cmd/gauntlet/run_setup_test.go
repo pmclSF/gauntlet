@@ -1,13 +1,18 @@
 package main
 
 import (
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gauntlet-dev/gauntlet/internal/fixture"
 	"github.com/gauntlet-dev/gauntlet/internal/policy"
 	"github.com/gauntlet-dev/gauntlet/internal/proxy"
+	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
 	"github.com/gauntlet-dev/gauntlet/internal/runner"
 	"github.com/gauntlet-dev/gauntlet/internal/tut"
 )
@@ -31,21 +36,26 @@ func TestLoadPolicyIfPresent_ExplicitMissingErrors(t *testing.T) {
 
 func TestParseProxyMode(t *testing.T) {
 	tests := []struct {
-		in      string
-		want    proxy.Mode
-		wantErr bool
+		in           string
+		want         proxy.Mode
+		wantErr      bool
+		wantContains string
 	}{
 		{in: "", want: proxy.ModeRecorded},
 		{in: "recorded", want: proxy.ModeRecorded},
 		{in: "live", want: proxy.ModeLive},
 		{in: "passthrough", want: proxy.ModePassthrough},
-		{in: "invalid", wantErr: true},
+		{in: "invalid", wantErr: true, wantContains: "invalid model mode"},
+		{in: "pr_ci", wantErr: true, wantContains: "--runner-mode"},
 	}
 	for _, tt := range tests {
 		got, err := parseProxyMode(tt.in)
 		if tt.wantErr {
 			if err == nil {
 				t.Fatalf("parseProxyMode(%q): expected error", tt.in)
+			}
+			if tt.wantContains != "" && !strings.Contains(err.Error(), tt.wantContains) {
+				t.Fatalf("parseProxyMode(%q): expected error containing %q, got %v", tt.in, tt.wantContains, err)
 			}
 			continue
 		}
@@ -67,11 +77,24 @@ func TestApplyResolvedPolicy(t *testing.T) {
 		DBDir:       filepath.Join(root, "evals", "world", "databases"),
 		BaselineDir: filepath.Join(root, "evals", "baselines"),
 		FixturesDir: filepath.Join(root, "evals", "fixtures"),
+		AssertionMode: policy.AssertionMode{
+			HardGates:   []string{"output_schema"},
+			SoftSignals: []string{"sensitive_leak"},
+		},
 		TUT: policy.TUTConfig{
 			Adapter: "cli",
 			Command: "python3",
 			Args:    []string{"-m", "agent.main"},
 			WorkDir: root,
+			ResourceLimits: tut.ResourceLimits{
+				CPUSeconds: 7,
+				MemoryMB:   384,
+				OpenFiles:  256,
+			},
+			Guardrails: tut.Guardrails{
+				HostilePayload: true,
+				MaxProcesses:   48,
+			},
 			Env: map[string]string{
 				"A": "1",
 			},
@@ -99,24 +122,17 @@ func TestApplyResolvedPolicy(t *testing.T) {
 	if cfg.TUTConfig.Env["A"] != "1" {
 		t.Fatalf("TUT env A = %q", cfg.TUTConfig.Env["A"])
 	}
-}
-
-func TestEffectiveModelModePrecedence(t *testing.T) {
-	t.Setenv("GAUNTLET_MODEL_MODE", "live")
-	resolved := &policy.Resolved{ModelMode: "recorded"}
-
-	if got := effectiveModelMode("passthrough", resolved); got != "passthrough" {
-		t.Fatalf("override precedence failed: got %q", got)
+	if cfg.TUTConfig.ResourceLimits.CPUSeconds != 7 || cfg.TUTConfig.ResourceLimits.MemoryMB != 384 || cfg.TUTConfig.ResourceLimits.OpenFiles != 256 {
+		t.Fatalf("unexpected TUT resource limits: %+v", cfg.TUTConfig.ResourceLimits)
 	}
-	if got := effectiveModelMode("", resolved); got != "live" {
-		t.Fatalf("env precedence failed: got %q", got)
+	if !cfg.TUTConfig.Guardrails.HostilePayload || cfg.TUTConfig.Guardrails.MaxProcesses != 48 {
+		t.Fatalf("unexpected TUT guardrails: %+v", cfg.TUTConfig.Guardrails)
 	}
-	t.Setenv("GAUNTLET_MODEL_MODE", "")
-	if got := effectiveModelMode("", resolved); got != "recorded" {
-		t.Fatalf("policy precedence failed: got %q", got)
+	if !cfg.HardGates["output_schema"] {
+		t.Fatalf("expected output_schema hard gate from policy")
 	}
-	if got := effectiveModelMode("", nil); got != "recorded" {
-		t.Fatalf("default mode failed: got %q", got)
+	if !cfg.SoftSignals["sensitive_leak"] {
+		t.Fatalf("expected sensitive_leak soft signal from policy")
 	}
 }
 
@@ -134,6 +150,8 @@ func TestEffectiveProxyAddrPrecedence(t *testing.T) {
 }
 
 func TestStartProxyForRun_PassthroughSkipsProxyAndInjectsEnv(t *testing.T) {
+	forceNonForkCIContext(t)
+
 	root := t.TempDir()
 	configPath := filepath.Join(root, "evals", "gauntlet.yml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -168,6 +186,8 @@ func TestStartProxyForRun_PassthroughSkipsProxyAndInjectsEnv(t *testing.T) {
 }
 
 func TestStartProxyForRun_RecordedStartsProxyAndInjectsEnv(t *testing.T) {
+	forceNonForkCIContext(t)
+
 	root := t.TempDir()
 	configPath := filepath.Join(root, "evals", "gauntlet.yml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -214,6 +234,8 @@ func TestStartProxyForRun_RecordedStartsProxyAndInjectsEnv(t *testing.T) {
 }
 
 func TestStartProxyForRun_InvalidModelModeFails(t *testing.T) {
+	forceNonForkCIContext(t)
+
 	root := t.TempDir()
 	configPath := filepath.Join(root, "evals", "gauntlet.yml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -244,6 +266,8 @@ func TestStartProxyForRun_InvalidModelModeFails(t *testing.T) {
 }
 
 func TestStartProxyForRun_PRCIRejectsLiveAndPassthrough(t *testing.T) {
+	forceNonForkCIContext(t)
+
 	root := t.TempDir()
 	configPath := filepath.Join(root, "evals", "gauntlet.yml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -269,9 +293,309 @@ func TestStartProxyForRun_PRCIRejectsLiveAndPassthrough(t *testing.T) {
 	}
 }
 
+func TestStartProxyForRun_PRCIRecordedRequiresReplayLockfile(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	suiteDir := filepath.Join(root, "evals", "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(suiteDir, "scenario.yaml"), []byte("scenario: lock_required\ninput:\n  messages:\n    - role: user\n      content: hi\n"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		Suite:      "smoke",
+		SuiteDir:   suiteDir,
+		Mode:       "pr_ci",
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+		ProxyAddr: "127.0.0.1:0",
+	}
+
+	_, err := startProxyForRun(&cfg, resolved, "recorded", "")
+	if err == nil {
+		t.Fatal("expected replay lockfile enforcement error")
+	}
+	if !strings.Contains(err.Error(), "replay lockfile missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartProxyForRun_PRCIRecordedRequiresTrustedFixturePublicKey(t *testing.T) {
+	forceNonForkCIContext(t)
+	t.Setenv("GAUNTLET_FIXTURE_TRUSTED_PUBLIC_KEY", "")
+	t.Setenv("GAUNTLET_FIXTURE_SIGNING_KEY", "")
+	t.Setenv("GAUNTLET_TRUSTED_RECORDER_IDENTITIES", "")
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	suiteDir := filepath.Join(root, "evals", "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(suiteDir, "scenario.yaml"), []byte("scenario: trust_required\ninput:\n  messages:\n    - role: user\n      content: hi\n"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		Suite:      "smoke",
+		SuiteDir:   suiteDir,
+		Mode:       "pr_ci",
+		TUTConfig:  tutConfigForTest(),
+	}
+	scenarioDigest := computeScenarioSetDigest(suiteDir)
+	store := fixture.NewStore(filepath.Join(root, "evals", "fixtures"))
+	cr := &providers.CanonicalRequest{
+		GauntletCanonicalVersion: 1,
+		ProviderFamily:           "openai_compatible",
+		Model:                    "gpt-4o-mini",
+		Messages:                 []providers.CanonicalMessage{{Role: "user", Content: "hello"}},
+		Sampling:                 providers.CanonicalSampling{},
+	}
+	canonicalBytes, err := fixture.CanonicalizeRequest(cr)
+	if err != nil {
+		t.Fatalf("canonicalize request: %v", err)
+	}
+	hash := fixture.HashCanonical(canonicalBytes)
+	mf := &fixture.ModelFixture{
+		FixtureID:         hash,
+		HashVersion:       1,
+		CanonicalHash:     hash,
+		ProviderFamily:    "openai_compatible",
+		Model:             "gpt-4o-mini",
+		CanonicalRequest:  canonicalBytes,
+		Response:          json.RawMessage(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`),
+		RecordedAt:        time.Now().UTC(),
+		RecordedBy:        "test",
+		Suite:             "smoke",
+		ScenarioSetSHA256: scenarioDigest,
+	}
+	if err := store.PutModelFixture(mf); err != nil {
+		t.Fatalf("put fixture: %v", err)
+	}
+	if _, _, err := fixture.WriteReplayLockfile(store, "smoke", scenarioDigest, "", time.Now().UTC()); err != nil {
+		t.Fatalf("write replay lockfile: %v", err)
+	}
+
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+		ProxyAddr: "127.0.0.1:0",
+	}
+	_, err = startProxyForRun(&cfg, resolved, "recorded", "")
+	if err == nil {
+		t.Fatal("expected fixture trust policy error")
+	}
+	if !strings.Contains(err.Error(), "fixture trust policy failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartProxyForRun_LiveCreatesFixtureSigningKey(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ProxyAddr: "127.0.0.1:0",
+	}
+	p, err := startProxyForRun(&cfg, resolved, "live", "")
+	if err != nil {
+		t.Fatalf("startProxyForRun: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected proxy instance")
+	}
+	defer func() { _ = p.Stop() }()
+
+	keyPath := filepath.Join(filepath.Dir(configPath), ".gauntlet", "fixture-signing-key.pem")
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("expected fixture signing key at %s: %v", keyPath, err)
+	}
+	if _, err := os.Stat(keyPath + ".pub.pem"); err != nil {
+		t.Fatalf("expected fixture signing public key at %s.pub.pem: %v", keyPath, err)
+	}
+}
+
+func TestStartProxyForRun_UntrustedCIRejectsLiveRegardlessOfModeFlag(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
+	t.Setenv("GITHUB_REPOSITORY", "acme/agent")
+	t.Setenv("GITHUB_HEAD_REPO", "contrib/agent-fork")
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		Mode:       "local",
+		TUTConfig:  tutConfigForTest(),
+	}
+	_, err := startProxyForRun(&cfg, nil, "live", "")
+	if err == nil {
+		t.Fatal("expected live mode rejection in untrusted CI context")
+	}
+	if !strings.Contains(err.Error(), "untrusted CI context") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartProxyForRun_ProxyPortClashCategorized(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+		ProxyAddr: ln.Addr().String(),
+	}
+	_, err = startProxyForRun(&cfg, resolved, "", "")
+	if err == nil {
+		t.Fatal("expected proxy startup failure for occupied address")
+	}
+	if !strings.Contains(err.Error(), "root_cause=port_clash") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartProxyForRun_InvalidCAFilesCategorizedAsCertIssue(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	caDir := filepath.Join(filepath.Dir(configPath), ".gauntlet")
+	if err := os.MkdirAll(caDir, 0o755); err != nil {
+		t.Fatalf("mkdir ca dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caDir, "ca.pem"), []byte("not-a-cert"), 0o644); err != nil {
+		t.Fatalf("write ca.pem: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(caDir, "ca.key"), []byte("not-a-key"), 0o600); err != nil {
+		t.Fatalf("write ca.key: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+		ProxyAddr: "127.0.0.1:0",
+	}
+	_, err := startProxyForRun(&cfg, resolved, "", "")
+	if err == nil {
+		t.Fatal("expected proxy startup failure for malformed CA files")
+	}
+	if !strings.Contains(err.Error(), "root_cause=cert_issue") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartProxyForRun_InsecureCAKeyPermissionsCategorizedAsCertIssue(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	caDir := filepath.Join(filepath.Dir(configPath), ".gauntlet")
+	if _, err := proxy.GenerateCA(caDir); err != nil {
+		t.Fatalf("generate ca: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(caDir, "ca.key"), 0o644); err != nil {
+		t.Fatalf("chmod ca.key: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+		ProxyAddr: "127.0.0.1:0",
+	}
+	_, err := startProxyForRun(&cfg, resolved, "", "")
+	if err == nil {
+		t.Fatal("expected proxy startup failure for insecure CA key permissions")
+	}
+	if !strings.Contains(err.Error(), "root_cause=cert_issue") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "permissions") {
+		t.Fatalf("expected permission context, got: %v", err)
+	}
+}
+
 func tutConfigForTest() tut.Config {
 	return tut.Config{
 		Command: "python3",
 		Env:     map[string]string{},
 	}
+}
+
+func forceNonForkCIContext(t *testing.T) {
+	t.Helper()
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("GITHUB_EVENT_NAME", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	t.Setenv("GITHUB_HEAD_REPO", "")
+	t.Setenv("GITHUB_EVENT_PATH", "")
 }
