@@ -108,6 +108,8 @@ def _patch_time(frozen: datetime.datetime):
     real_datetime = datetime.datetime
     real_localtime = time.localtime
 
+    real_date = datetime.date
+
     class FrozenDatetime(real_datetime):
         @classmethod
         def now(cls, tz=None):
@@ -121,7 +123,13 @@ def _patch_time(frozen: datetime.datetime):
                 tzinfo=None
             )
 
+    class FrozenDate(real_date):
+        @classmethod
+        def today(cls):
+            return frozen_utc.date()
+
     _start_patch("datetime.datetime", FrozenDatetime)
+    _start_patch("datetime.date", FrozenDate)
     _start_patch("time.time", lambda: frozen_epoch)
     _start_patch(
         "time.localtime",
@@ -129,6 +137,9 @@ def _patch_time(frozen: datetime.datetime):
             frozen_epoch if secs is None else secs
         ),
     )
+    # Freeze monotonic clock so duration-based logic is deterministic.
+    _monotonic_base = time.monotonic()
+    _start_patch("time.monotonic", lambda: _monotonic_base)
 
 
 def disconnect():

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
@@ -26,6 +27,15 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	// Build environment.
 	cmd.Env = mergedProcessEnv(config.Env, config.RestrictHostEnv)
 
+	// Create temp file for trace events.
+	traceFile, err := os.CreateTemp("", "gauntlet-trace-*.ndjson")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trace file: %w", err)
+	}
+	tracePath := traceFile.Name()
+	traceFile.Close()
+	cmd.Env = append(cmd.Env, "GAUNTLET_TRACE_FILE="+tracePath)
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -38,6 +48,7 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	}
 
 	if err := cmd.Start(); err != nil {
+		os.Remove(tracePath)
 		return nil, fmt.Errorf("failed to start TUT: %w", err)
 	}
 
@@ -72,23 +83,26 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	}
 	if !ready {
 		_ = cmd.Process.Kill()
+		os.Remove(tracePath)
 		return nil, fmt.Errorf("TUT did not become healthy at %s/health within %s (stderr: %s)", baseURL, startupTimeout, stderr.String())
 	}
 
 	return &httpHandle{
-		cmd:     cmd,
-		baseURL: baseURL,
-		path:    path,
-		stderr:  &stderr,
+		cmd:       cmd,
+		baseURL:   baseURL,
+		path:      path,
+		stderr:    &stderr,
+		tracePath: tracePath,
 	}, nil
 }
 
 type httpHandle struct {
-	cmd     *exec.Cmd
-	baseURL string
-	path    string
-	stderr  *bytes.Buffer
-	traces  []TraceEvent
+	cmd       *exec.Cmd
+	baseURL   string
+	path      string
+	stderr    *bytes.Buffer
+	tracePath string
+	traces    []TraceEvent
 }
 
 func (h *httpHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput, error) {
@@ -131,10 +145,19 @@ func (h *httpHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutpu
 }
 
 func (h *httpHandle) Traces() []TraceEvent {
+	// Parse trace file on each call to get accumulated events.
+	if h.tracePath != "" {
+		if traces, err := parseTraceFile(h.tracePath); err == nil {
+			h.traces = traces
+		}
+	}
 	return h.traces
 }
 
 func (h *httpHandle) Stop(ctx context.Context) error {
+	if h.tracePath != "" {
+		os.Remove(h.tracePath)
+	}
 	if h.cmd.Process != nil {
 		return h.cmd.Process.Kill()
 	}

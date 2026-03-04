@@ -25,4 +25,3 @@ assertions:
       type: object
       required: ["response"]
   - type: sensitive_leak
-    patterns: ["credit_card", "ssn"]

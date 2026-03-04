@@ -82,6 +82,11 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 
 	fixturesDir := effectiveFixturesDir(cfg)
 	cfg.TUTConfig.Env["GAUNTLET_FIXTURE_DIR"] = filepath.Join(fixturesDir, "tools")
+
+	// Pass redaction field paths to the Python SDK for tool fixture redaction
+	if resolved != nil && len(resolved.RedactFields) > 0 {
+		cfg.TUTConfig.Env["GAUNTLET_REDACT_FIELDS"] = strings.Join(resolved.RedactFields, ",")
+	}
 	addr := effectiveProxyAddr(proxyAddrOverride, resolved)
 	if addr == "" {
 		addr = "localhost:7431"
