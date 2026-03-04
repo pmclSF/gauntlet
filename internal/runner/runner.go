@@ -6,11 +6,13 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,20 +28,23 @@ import (
 
 // Config holds runner configuration from gauntlet.yml and CLI flags.
 type Config struct {
-	Suite          string
-	ConfigPath     string
-	Mode           string // pr_ci, nightly, local
-	OutputDir      string
-	EvalsDir       string
-	SuiteDir       string
-	ToolsDir       string
-	DBDir          string
-	BaselineDir    string
-	FixturesDir    string
-	TUTConfig      tut.Config
-	DryRun         bool
-	BudgetMs       int64
-	ScenarioFilter string
+	Suite            string
+	ConfigPath       string
+	Mode             string // pr_ci, nightly, local
+	OutputDir        string
+	EvalsDir         string
+	SuiteDir         string
+	ToolsDir         string
+	DBDir            string
+	BaselineDir      string
+	FixturesDir      string
+	TUTConfig        tut.Config
+	DryRun           bool
+	BudgetMs         int64
+	ScenarioBudgetMs int64
+	ScenarioFilter   string
+	HardGates        map[string]bool
+	SoftSignals      map[string]bool
 }
 
 // Runner is the main Gauntlet test runner.
@@ -71,13 +76,10 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	requiresBlockedEgress := modeRequiresBlockedEgress(r.Config.Mode)
 	egressStatus := EgressUnknown
 	if requiresBlockedEgress {
-		egressStatus = checkEgressBlockedFn()
-		if egressStatus != EgressBlocked {
-			return nil, fmt.Errorf(
-				"mode %q requires blocked network egress, but current status is %s; enforce OS-level egress blocking before running (or use --mode local/nightly)",
-				r.Config.Mode,
-				egressStatus.String(),
-			)
+		var err error
+		egressStatus, err = r.runEgressSelfTest()
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -134,32 +136,45 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	if budgetMs == 0 {
 		budgetMs = 300000 // 5 minutes default
 	}
+	scenarioBudgetMs := r.Config.ScenarioBudgetMs
+	if scenarioBudgetMs <= 0 {
+		scenarioBudgetMs = budgetMs
+	}
 
 	result := &output.RunResult{
-		Version:       "1",
-		Suite:         r.Config.Suite,
-		Commit:        getCommit(),
-		StartedAt:     startTime,
-		BudgetMs:      budgetMs,
-		Mode:          r.Config.Mode,
-		EgressBlocked: requiresBlockedEgress && egressStatus == EgressBlocked,
+		Version:          "1",
+		Suite:            r.Config.Suite,
+		Commit:           getCommit(),
+		StartedAt:        startTime,
+		BudgetMs:         budgetMs,
+		ScenarioBudgetMs: scenarioBudgetMs,
+		Mode:             r.Config.Mode,
+		EgressBlocked:    requiresBlockedEgress && egressStatus == EgressBlocked,
 	}
 
 	var executions []scenarioExecution
 	// Run each scenario
 	for _, s := range scenarios {
 		elapsed := time.Since(startTime).Milliseconds()
-		if elapsed >= budgetMs {
+		remainingSuiteMs := budgetMs - elapsed
+		if remainingSuiteMs <= 0 {
 			result.Scenarios = append(result.Scenarios, output.ScenarioResult{
-				Name:   s.Name,
-				Status: "skipped_budget",
+				Name:            s.Name,
+				Status:          "skipped_budget",
+				FailureCategory: "budget_exhausted",
 			})
 			result.Summary.SkippedBudget++
 			continue
 		}
 
-		exec := r.runScenario(ctx, s, worldState, baselineDir, requiresBlockedEgress)
+		effectiveScenarioBudgetMs := scenarioBudgetMs
+		if effectiveScenarioBudgetMs <= 0 || remainingSuiteMs < effectiveScenarioBudgetMs {
+			effectiveScenarioBudgetMs = remainingSuiteMs
+		}
+		exec := r.runScenario(ctx, s, worldState, baselineDir, requiresBlockedEgress, effectiveScenarioBudgetMs)
 		sr := exec.Result
+		sr.FailureCategory = inferFailureCategory(sr)
+		exec.Result = sr
 		executions = append(executions, exec)
 		result.Scenarios = append(result.Scenarios, sr)
 
@@ -186,6 +201,8 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 		return result, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	_ = output.PopulateHistoryMetadata(result, outputDir)
+
 	if err := output.WriteResults(outputDir, result); err != nil {
 		return result, fmt.Errorf("failed to write results.json: %w", err)
 	}
@@ -204,11 +221,17 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	return result, nil
 }
 
-func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *world.State, baselineDir string, requiresBlockedEgress bool) scenarioExecution {
+func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *world.State, baselineDir string, requiresBlockedEgress bool, scenarioBudgetMs int64) scenarioExecution {
 	start := time.Now()
+	if scenarioBudgetMs > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(scenarioBudgetMs)*time.Millisecond)
+		defer cancel()
+	}
 
 	sr := output.ScenarioResult{
-		Name: s.Name,
+		Name:     s.Name,
+		BudgetMs: scenarioBudgetMs,
 	}
 	exec := scenarioExecution{
 		Result:    sr,
@@ -217,7 +240,7 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	}
 
 	// Validate variant policy
-	if err := world.ValidateVariantPolicy(s.World.Tools, s.Chaos); err != nil {
+	if err := world.ValidateVariantPolicy(s.World.Tools, s.World.Databases, s.Chaos); err != nil {
 		sr.Status = "error"
 		sr.Assertions = []assertions.Result{{
 			AssertionType: "variant_policy",
@@ -233,6 +256,8 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 		Parsed: make(map[string]interface{}),
 	}
 	var toolTrace []tut.TraceEvent
+	var capabilityDiagnostics []assertions.Result
+	var envDiagnostics []assertions.Result
 
 	var handle tut.Handle
 	if r.Adapter != nil && !r.Config.DryRun {
@@ -256,11 +281,17 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 
 		started, err := r.Adapter.Start(ctx, tutConfig)
 		if err != nil {
+			assertionType := "tut_start"
+			message := err.Error()
+			if scenarioTimeoutExceeded(ctx, err) {
+				assertionType = "scenario_timeout"
+				message = fmt.Sprintf("scenario exceeded budget (%dms) while starting TUT", scenarioBudgetMs)
+			}
 			sr.Status = "error"
 			sr.Assertions = []assertions.Result{{
-				AssertionType: "tut_start",
+				AssertionType: assertionType,
 				Passed:        false,
-				Message:       err.Error(),
+				Message:       message,
 			}}
 			sr.DurationMs = time.Since(start).Milliseconds()
 			exec.Result = sr
@@ -277,11 +308,17 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	if handle != nil {
 		out, err := handle.Run(ctx, s.Input)
 		if err != nil {
+			assertionType := "tut_execution"
+			message := err.Error()
+			if scenarioTimeoutExceeded(ctx, err) {
+				assertionType = "scenario_timeout"
+				message = fmt.Sprintf("scenario exceeded budget (%dms) during execution", scenarioBudgetMs)
+			}
 			sr.Status = "error"
 			sr.Assertions = []assertions.Result{{
-				AssertionType: "tut_execution",
+				AssertionType: assertionType,
 				Passed:        false,
-				Message:       err.Error(),
+				Message:       message,
 			}}
 			sr.DurationMs = time.Since(start).Milliseconds()
 			exec.Result = sr
@@ -296,6 +333,8 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 		}
 		toolTrace = handle.Traces()
 		exec.ToolTrace = toolTrace
+		capabilityDiagnostics = r.adapterCapabilityDiagnostics(handle, toolTrace)
+		envDiagnostics = r.environmentFreezeDiagnostics(handle, toolTrace)
 	}
 
 	// Load baseline
@@ -336,7 +375,10 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 				Message:       w.Message,
 			})
 		}
+		results = append(results, capabilityDiagnostics...)
+		results = append(results, envDiagnostics...)
 	}
+	results = enforceAssertionMode(results, r.Config.HardGates, r.Config.SoftSignals)
 
 	sr.Assertions = results
 	sr.DocketTags, sr.PrimaryTag = docket.Classify(results)
@@ -358,6 +400,69 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 
 	exec.Result = sr
 	return exec
+}
+
+func scenarioTimeoutExceeded(ctx context.Context, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "timed out")
+}
+
+func inferFailureCategory(sr output.ScenarioResult) string {
+	switch sr.Status {
+	case "failed":
+		return "assertion_failure"
+	case "error":
+		for _, assertion := range sr.Assertions {
+			if assertion.AssertionType == "scenario_timeout" {
+				return "timeout"
+			}
+		}
+		return "infra_failure"
+	case "skipped_budget":
+		return "budget_exhausted"
+	case "passed":
+		for _, assertion := range sr.Assertions {
+			if strings.HasPrefix(assertion.AssertionType, "nondeterminism.") && !assertion.Passed {
+				return "nondeterminism_warning"
+			}
+		}
+	}
+	return ""
+}
+
+func (r *Runner) runEgressSelfTest() (EgressStatus, error) {
+	status := checkEgressBlockedFn()
+	if status != EgressBlocked {
+		return status, fmt.Errorf(
+			"egress self-test failed: mode %q requires blocked network egress, but outbound socket probe reported %s; enforce OS-level egress blocking before running (or use --runner-mode local/nightly)",
+			r.Config.Mode,
+			status.String(),
+		)
+	}
+	return status, nil
+}
+
+func enforceAssertionMode(results []assertions.Result, hardGates, softSignals map[string]bool) []assertions.Result {
+	if len(hardGates) == 0 && len(softSignals) == 0 {
+		return results
+	}
+	for i := range results {
+		name := strings.TrimSpace(results[i].AssertionType)
+		if name == "" {
+			continue
+		}
+		if softSignals[name] {
+			results[i].Soft = true
+			continue
+		}
+		if hardGates[name] {
+			results[i].Soft = false
+		}
+	}
+	return results
 }
 
 func buildToolState(ws *world.State, toolStates map[string]string) map[string]assertions.ToolState {
@@ -384,6 +489,193 @@ func getToolSequence(bl *baseline.Contract) []string {
 		return bl.ToolSequence.Required
 	}
 	return nil
+}
+
+func (r *Runner) adapterCapabilityDiagnostics(handle tut.Handle, traces []tut.TraceEvent) []assertions.Result {
+	if r.Adapter == nil {
+		return nil
+	}
+	if r.Adapter.Level() == tut.LevelMinimal {
+		return nil
+	}
+
+	capabilities := tut.ExtractSDKCapabilities(traces)
+	if provider, ok := handle.(tut.CapabilityProvider); ok {
+		if reported := provider.Capabilities(); reported != nil {
+			capabilities = reported
+		}
+	}
+
+	if capabilities == nil {
+		return []assertions.Result{{
+			AssertionType: "adapter_capabilities",
+			Passed:        false,
+			Soft:          true,
+			Message:       "SDK capability negotiation unavailable; ensure gauntlet.connect() is called and SDK supports capability protocol v1",
+		}}
+	}
+
+	var diagnostics []assertions.Result
+	if capabilities.ProtocolVersion != tut.CapabilityProtocolV1 {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "adapter_capabilities",
+			Passed:        false,
+			Soft:          true,
+			Message:       fmt.Sprintf("unsupported capability protocol version %d (expected %d)", capabilities.ProtocolVersion, tut.CapabilityProtocolV1),
+		})
+	}
+
+	if len(capabilities.Adapters) == 0 {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "adapter_capabilities",
+			Passed:        false,
+			Soft:          true,
+			Message:       "capability negotiation returned no adapter feature data",
+		})
+		return diagnostics
+	}
+
+	names := make([]string, 0, len(capabilities.Adapters))
+	for name := range capabilities.Adapters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		cap := capabilities.Adapters[name]
+		if cap.Enabled && !cap.Patched {
+			reason := strings.TrimSpace(cap.Reason)
+			if reason == "" {
+				reason = "unknown_reason"
+			}
+			diagnostics = append(diagnostics, assertions.Result{
+				AssertionType: "adapter_capabilities",
+				Passed:        false,
+				Soft:          true,
+				Message:       fmt.Sprintf("adapter %s missing instrumentation: %s", name, reason),
+			})
+		}
+	}
+
+	return diagnostics
+}
+
+func (r *Runner) environmentFreezeDiagnostics(handle tut.Handle, traces []tut.TraceEvent) []assertions.Result {
+	if r.Adapter == nil || handle == nil {
+		return nil
+	}
+	if r.Adapter.Level() == tut.LevelMinimal {
+		return nil
+	}
+
+	report := tut.ExtractDeterminismEnvReport(traces)
+	capabilities := tut.ExtractSDKCapabilities(traces)
+	if provider, ok := handle.(tut.CapabilityProvider); ok {
+		if reported := provider.Capabilities(); reported != nil {
+			capabilities = reported
+		}
+	}
+
+	sdkName := "unknown"
+	if capabilities != nil && strings.TrimSpace(capabilities.SDK) != "" {
+		sdkName = strings.TrimSpace(capabilities.SDK)
+	}
+
+	if report == nil {
+		if sdkName != "gauntlet-python" {
+			return []assertions.Result{{
+				AssertionType: "nondeterminism.env",
+				Passed:        false,
+				Soft:          true,
+				Message:       fmt.Sprintf("environment freeze verification unavailable for sdk %q; runtime verification currently implemented for gauntlet-python", sdkName),
+			}}
+		}
+		return []assertions.Result{{
+			AssertionType: "nondeterminism.env",
+			Passed:        false,
+			Soft:          true,
+			Message:       "gauntlet-python runtime did not emit determinism_env verification; ensure gauntlet.connect() is called before agent execution",
+		}}
+	}
+
+	diagnostics := make([]assertions.Result, 0, 4)
+	expectedFreeze := strings.TrimSpace(r.Harness.FreezeTime.UTC().Format(time.RFC3339))
+	if strings.TrimSpace(report.RequestedFreezeTime) != "" && !sameRFC3339Instant(report.RequestedFreezeTime, expectedFreeze) {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "nondeterminism.env",
+			Passed:        false,
+			Soft:          true,
+			Message:       fmt.Sprintf("freeze time mismatch: expected %s, runtime requested %s", expectedFreeze, strings.TrimSpace(report.RequestedFreezeTime)),
+		})
+	}
+	if !report.TimePatched {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "nondeterminism.env",
+			Passed:        false,
+			Soft:          true,
+			Message:       "runtime reported time patch not applied",
+		})
+	}
+
+	expectedTimezone := strings.TrimSpace(r.Harness.Timezone)
+	if expectedTimezone != "" && (!report.TimezoneApplied || !timezoneEquivalent(report.EffectiveTimezone, expectedTimezone)) {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "nondeterminism.env",
+			Passed:        false,
+			Soft:          true,
+			Message:       fmt.Sprintf("timezone verification failed: expected %q, effective %q (applied=%t)", expectedTimezone, strings.TrimSpace(report.EffectiveTimezone), report.TimezoneApplied),
+		})
+	}
+
+	expectedLocale := strings.TrimSpace(r.Harness.Locale)
+	if expectedLocale != "" && (!report.LocaleApplied || !localeEquivalent(report.EffectiveLocale, expectedLocale)) {
+		diagnostics = append(diagnostics, assertions.Result{
+			AssertionType: "nondeterminism.env",
+			Passed:        false,
+			Soft:          true,
+			Message:       fmt.Sprintf("locale verification failed: expected %q, effective %q (applied=%t)", expectedLocale, strings.TrimSpace(report.EffectiveLocale), report.LocaleApplied),
+		})
+	}
+
+	return diagnostics
+}
+
+func sameRFC3339Instant(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	at, aErr := time.Parse(time.RFC3339, a)
+	bt, bErr := time.Parse(time.RFC3339, b)
+	if aErr != nil || bErr != nil {
+		return strings.EqualFold(a, b)
+	}
+	return at.UTC().Equal(bt.UTC())
+}
+
+func timezoneEquivalent(actual, expected string) bool {
+	actualNorm := strings.ToUpper(strings.TrimSpace(actual))
+	expectedNorm := strings.ToUpper(strings.TrimSpace(expected))
+	if actualNorm == "" || expectedNorm == "" {
+		return actualNorm == expectedNorm
+	}
+	if actualNorm == expectedNorm {
+		return true
+	}
+	return strings.Contains(actualNorm, expectedNorm)
+}
+
+func localeEquivalent(actual, expected string) bool {
+	actualNorm := strings.ToLower(strings.TrimSpace(actual))
+	expectedNorm := strings.ToLower(strings.TrimSpace(expected))
+	if actualNorm == "" || expectedNorm == "" {
+		return actualNorm == expectedNorm
+	}
+	if actualNorm == expectedNorm {
+		return true
+	}
+	return strings.Contains(actualNorm, expectedNorm)
 }
 
 func getForbiddenContent(bl *baseline.Contract) []string {

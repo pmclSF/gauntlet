@@ -152,6 +152,35 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	if !strings.Contains(workflowText, "permissions:") || !strings.Contains(workflowText, "contents: read") {
 		t.Error("workflow should use least-privilege permissions")
 	}
+	if !strings.Contains(workflowText, "gauntlet scan-artifacts --dir evals") {
+		t.Error("workflow should run gauntlet scan-artifacts before upload")
+	}
+	if !strings.Contains(workflowText, "gauntlet sign-artifacts --dir evals/runs") {
+		t.Error("workflow should sign artifact evidence bundle before upload")
+	}
+	if !strings.Contains(workflowText, "gauntlet check-baseline-approval") {
+		t.Error("workflow should enforce baseline approval policy for baseline-changing PRs")
+	}
+	if !strings.Contains(workflowText, "git fetch --no-tags --prune --depth=1 origin \"${{ github.base_ref }}\"") {
+		t.Error("workflow should fetch PR base ref for deterministic baseline diff")
+	}
+	approvalIdx := strings.Index(workflowText, "gauntlet check-baseline-approval")
+	runIdx := strings.Index(workflowText, "name: Run Gauntlet smoke suite")
+	if approvalIdx == -1 || runIdx == -1 || approvalIdx > runIdx {
+		t.Error("baseline approval check must run before gauntlet suite execution")
+	}
+	scanIdx := strings.Index(workflowText, "gauntlet scan-artifacts --dir evals")
+	signIdx := strings.Index(workflowText, "gauntlet sign-artifacts --dir evals/runs")
+	uploadIdx := strings.Index(workflowText, "name: Upload results")
+	if scanIdx == -1 || signIdx == -1 || uploadIdx == -1 {
+		t.Error("scan/sign/upload steps must all exist in workflow")
+	}
+	if scanIdx > signIdx {
+		t.Error("scan-artifacts step must appear before sign-artifacts step")
+	}
+	if signIdx > uploadIdx {
+		t.Error("sign-artifacts step must appear before upload step")
+	}
 	requiredPins := []string{
 		"actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
 		"actions/setup-go@479c797a328a0dfa73d811c5d9d2d8aa7b69b838",

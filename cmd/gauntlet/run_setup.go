@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
+	"github.com/gauntlet-dev/gauntlet/internal/ci"
 	"github.com/gauntlet-dev/gauntlet/internal/fixture"
 	"github.com/gauntlet-dev/gauntlet/internal/policy"
 	"github.com/gauntlet-dev/gauntlet/internal/proxy"
 	"github.com/gauntlet-dev/gauntlet/internal/runner"
+	"github.com/gauntlet-dev/gauntlet/internal/scenario"
 	"github.com/gauntlet-dev/gauntlet/internal/tut"
 )
 
@@ -41,6 +46,8 @@ func applyResolvedPolicy(cfg *runner.Config, resolved *policy.Resolved, configPa
 	cfg.DBDir = resolved.DBDir
 	cfg.BaselineDir = resolved.BaselineDir
 	cfg.FixturesDir = resolved.FixturesDir
+	cfg.HardGates = toBoolSet(resolved.AssertionMode.HardGates)
+	cfg.SoftSignals = toBoolSet(resolved.AssertionMode.SoftSignals)
 	cfg.TUTConfig = tut.Config{
 		Command:   resolved.TUT.Command,
 		Args:      append([]string{}, resolved.TUT.Args...),
@@ -50,6 +57,15 @@ func applyResolvedPolicy(cfg *runner.Config, resolved *policy.Resolved, configPa
 		HTTPPort:  resolved.TUT.HTTPPort,
 		HTTPPath:  resolved.TUT.HTTPPath,
 		StartupMs: resolved.TUT.StartupMs,
+		ResourceLimits: tut.ResourceLimits{
+			CPUSeconds: resolved.TUT.ResourceLimits.CPUSeconds,
+			MemoryMB:   resolved.TUT.ResourceLimits.MemoryMB,
+			OpenFiles:  resolved.TUT.ResourceLimits.OpenFiles,
+		},
+		Guardrails: tut.Guardrails{
+			HostilePayload: resolved.TUT.Guardrails.HostilePayload,
+			MaxProcesses:   resolved.TUT.Guardrails.MaxProcesses,
+		},
 	}
 }
 
@@ -71,7 +87,13 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 		return nil, nil
 	}
 
-	modelMode := effectiveModelMode(modelModeOverride, resolved)
+	modelMode, err := resolveModelMode(modelModeOverride, resolved)
+	if err != nil {
+		return nil, err
+	}
+	if isUntrustedCIContext() && modelMode != "recorded" {
+		return nil, fmt.Errorf("untrusted CI context (%s) requires GAUNTLET_MODEL_MODE=recorded (got %q)", ci.DetectMode(), modelMode)
+	}
 	if requiresRecordedModelMode(cfg.Mode) && modelMode != "recorded" {
 		return nil, fmt.Errorf("mode %q requires GAUNTLET_MODEL_MODE=recorded (got %q)", cfg.Mode, modelMode)
 	}
@@ -101,19 +123,50 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 		return nil, err
 	}
 	store := fixture.NewStore(fixturesDir)
+	scenarioDigest := computeScenarioSetDigest(cfg.SuiteDir)
+	store.SetReplayContext(cfg.Suite, scenarioDigest)
+
+	signingKeyPath := effectiveFixtureSigningKeyPath(cfg.ConfigPath)
+	if proxyMode == proxy.ModeLive {
+		if err := store.EnableFixtureSigning(signingKeyPath); err != nil {
+			return nil, fmt.Errorf("fixture signing setup failed: %w", err)
+		}
+	}
+
+	if modelMode == "recorded" && requiresRecordedModelMode(cfg.Mode) {
+		if err := fixture.VerifyReplayLockfile(store, cfg.Suite, scenarioDigest, ""); err != nil {
+			return nil, fmt.Errorf("replay integrity check failed: %w\n  Regenerate lockfile with: gauntlet lock-fixtures --suite %s --config %s", err, cfg.Suite, cfg.ConfigPath)
+		}
+		if err := store.ConfigureFixtureTrust(fixture.FixtureTrustOptions{
+			RequireSignatures:         true,
+			TrustedPublicKeyPaths:     []string{effectiveFixtureTrustedPublicKeyPath(signingKeyPath)},
+			TrustedRecorderIdentities: trustedRecorderIdentitiesFromEnv(),
+		}); err != nil {
+			return nil, fmt.Errorf(
+				"fixture trust policy failed: %w\n  Ensure trusted replay public key exists and matches recorder signatures.\n  Expected key: %s\n  Record/migrate fixtures in trusted context to (re)sign them.",
+				err,
+				effectiveFixtureTrustedPublicKeyPath(signingKeyPath),
+			)
+		}
+	}
 
 	caDir := filepath.Join(filepath.Dir(cfg.ConfigPath), ".gauntlet")
 	ca, err := proxy.LoadCA(caDir)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, classifyProxyStartupError(proxyStartCertIssue, addr, caDir, err)
+		}
 		ca, err = proxy.GenerateCA(caDir)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize proxy CA in %s: %w", caDir, err)
+			return nil, classifyProxyStartupError(proxyStartCertIssue, addr, caDir, err)
 		}
 	}
 
 	p := proxy.NewProxy(addr, proxyMode, store, ca)
+	p.Suite = cfg.Suite
+	p.ScenarioSetSHA256 = scenarioDigest
 	if err := p.Start(context.Background()); err != nil {
-		return nil, fmt.Errorf("failed to start proxy on %s: %w", addr, err)
+		return nil, classifyProxyStartupError(proxyStartListen, addr, caDir, err)
 	}
 
 	certPath := filepath.Join(caDir, "ca.pem")
@@ -136,7 +189,11 @@ func requiresRecordedModelMode(mode string) bool {
 }
 
 func parseProxyMode(raw string) (proxy.Mode, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	mode, err := validateModelMode(raw, modelModeFlagName)
+	if err != nil {
+		return "", err
+	}
+	switch mode {
 	case "recorded", "":
 		return proxy.ModeRecorded, nil
 	case "live":
@@ -146,21 +203,6 @@ func parseProxyMode(raw string) (proxy.Mode, error) {
 	default:
 		return "", fmt.Errorf("invalid model mode %q (expected recorded, live, or passthrough)", raw)
 	}
-}
-
-func effectiveModelMode(modelModeOverride string, resolved *policy.Resolved) string {
-	if mode := strings.ToLower(strings.TrimSpace(modelModeOverride)); mode != "" {
-		return mode
-	}
-	if mode := strings.ToLower(strings.TrimSpace(os.Getenv("GAUNTLET_MODEL_MODE"))); mode != "" {
-		return mode
-	}
-	if resolved != nil {
-		if mode := strings.ToLower(strings.TrimSpace(resolved.ModelMode)); mode != "" {
-			return mode
-		}
-	}
-	return "recorded"
 }
 
 func effectiveProxyAddr(proxyAddrOverride string, resolved *policy.Resolved) string {
@@ -184,12 +226,125 @@ func effectiveFixturesDir(cfg *runner.Config) string {
 	return filepath.Join(base, "fixtures")
 }
 
+func effectiveFixtureSigningKeyPath(configPath string) string {
+	if override := strings.TrimSpace(os.Getenv("GAUNTLET_FIXTURE_SIGNING_KEY")); override != "" {
+		return filepath.Clean(override)
+	}
+	return filepath.Clean(fixture.DefaultFixtureSigningKeyPath(configPath))
+}
+
+func effectiveFixtureTrustedPublicKeyPath(signingKeyPath string) string {
+	if override := strings.TrimSpace(os.Getenv("GAUNTLET_FIXTURE_TRUSTED_PUBLIC_KEY")); override != "" {
+		return filepath.Clean(override)
+	}
+	return filepath.Clean(strings.TrimSpace(signingKeyPath) + ".pub.pem")
+}
+
+func trustedRecorderIdentitiesFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("GAUNTLET_TRUSTED_RECORDER_IDENTITIES"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, id)
+	}
+	return out
+}
+
 func splitKV(raw string) (string, string, bool) {
 	parts := strings.SplitN(raw, "=", 2)
 	if len(parts) != 2 || parts[0] == "" {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
+}
+
+func computeScenarioSetDigest(suiteDir string) string {
+	suiteDir = strings.TrimSpace(suiteDir)
+	if suiteDir == "" {
+		return ""
+	}
+	scenarios, err := scenario.LoadSuite(suiteDir)
+	if err != nil {
+		return ""
+	}
+	names := make([]string, 0, len(scenarios))
+	for _, s := range scenarios {
+		names = append(names, s.Name)
+	}
+	sort.Strings(names)
+	return fixture.ScenarioSetDigest(names)
+}
+
+func toBoolSet(items []string) map[string]bool {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			continue
+		}
+		out[name] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isUntrustedCIContext() bool {
+	return ci.DetectMode() == "fork_pr"
+}
+
+type proxyStartCause string
+
+const (
+	proxyStartListen    proxyStartCause = "listen"
+	proxyStartCertIssue proxyStartCause = "cert_issue"
+)
+
+func classifyProxyStartupError(cause proxyStartCause, addr, caDir string, err error) error {
+	rootCause := "unknown"
+	remediation := "Check previous error details and rerun with --proxy-addr 127.0.0.1:0 for ephemeral port binding."
+
+	switch {
+	case isAddrInUseError(err):
+		rootCause = "port_clash"
+		remediation = "Stop the process using this port, or rerun with --proxy-addr 127.0.0.1:0."
+	case isPermissionError(err):
+		rootCause = "permission"
+		remediation = "Grant permission for socket/certificate file access or choose a writable config directory."
+	case cause == proxyStartCertIssue:
+		rootCause = "cert_issue"
+		remediation = fmt.Sprintf("Inspect and repair CA files in %s (.gauntlet/ca.pem, .gauntlet/ca.key).", caDir)
+	}
+
+	return fmt.Errorf("proxy startup failed [root_cause=%s]: %w\n  Address: %s\n  Fix: %s", rootCause, err, addr, remediation)
+}
+
+func isAddrInUseError(err error) bool {
+	return errors.Is(err, syscall.EADDRINUSE) ||
+		strings.Contains(strings.ToLower(err.Error()), "address already in use")
+}
+
+func isPermissionError(err error) bool {
+	return errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.EACCES)
 }
 
 func copyStringMap(in map[string]string) map[string]string {

@@ -46,6 +46,14 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 		}
 		cmd = wrapped
 	}
+	cmd, err = wrapWithHostilePayloadGuardrails(cmd, config.Guardrails)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply hostile payload guardrails: %w", err)
+	}
+	cmd, err = wrapWithResourceLimits(cmd, config.ResourceLimits)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply TUT resource limits: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		os.Remove(tracePath)
@@ -97,12 +105,13 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 }
 
 type httpHandle struct {
-	cmd       *exec.Cmd
-	baseURL   string
-	path      string
-	stderr    *bytes.Buffer
-	tracePath string
-	traces    []TraceEvent
+	cmd          *exec.Cmd
+	baseURL      string
+	path         string
+	stderr       *bytes.Buffer
+	tracePath    string
+	traces       []TraceEvent
+	capabilities *SDKCapabilities
 }
 
 func (h *httpHandle) Run(ctx context.Context, input scenario.Input) (*AgentOutput, error) {
@@ -149,9 +158,14 @@ func (h *httpHandle) Traces() []TraceEvent {
 	if h.tracePath != "" {
 		if traces, err := parseTraceFile(h.tracePath); err == nil {
 			h.traces = traces
+			h.capabilities = ExtractSDKCapabilities(traces)
 		}
 	}
 	return h.traces
+}
+
+func (h *httpHandle) Capabilities() *SDKCapabilities {
+	return cloneSDKCapabilities(h.capabilities)
 }
 
 func (h *httpHandle) Stop(ctx context.Context) error {
