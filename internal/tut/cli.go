@@ -16,19 +16,21 @@ import (
 // rawSDKEvent matches the JSON format emitted by the Python SDK's events.py.
 // Field names differ from TraceEvent (e.g. "type" vs "event_type").
 type rawSDKEvent struct {
-	GauntletEvent  bool            `json:"gauntlet_event"`
-	Type           string          `json:"type"`
-	Timestamp      float64         `json:"timestamp"`
-	ToolName       string          `json:"tool_name,omitempty"`
-	Args           json.RawMessage `json:"args,omitempty"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	FixtureHit     bool            `json:"fixture_hit,omitempty"`
-	CanonicalHash  string          `json:"canonical_hash,omitempty"`
-	ProviderFamily string          `json:"provider_family,omitempty"`
-	Model          string          `json:"model,omitempty"`
-	DurationMs     int             `json:"duration_ms,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	GauntletEvent    bool            `json:"gauntlet_event"`
+	Type             string          `json:"type"`
+	Timestamp        float64         `json:"timestamp"`
+	ToolName         string          `json:"tool_name,omitempty"`
+	Args             json.RawMessage `json:"args,omitempty"`
+	Result           json.RawMessage `json:"result,omitempty"`
+	FixtureHit       bool            `json:"fixture_hit,omitempty"`
+	CanonicalHash    string          `json:"canonical_hash,omitempty"`
+	ProviderFamily   string          `json:"provider_family,omitempty"`
+	Model            string          `json:"model,omitempty"`
+	PromptTokens     int             `json:"prompt_tokens,omitempty"`
+	CompletionTokens int             `json:"completion_tokens,omitempty"`
+	DurationMs       int             `json:"duration_ms,omitempty"`
+	Error            string          `json:"error,omitempty"`
+	Metadata         json.RawMessage `json:"metadata,omitempty"`
 }
 
 // parseTraceFile reads NDJSON trace events from a file written by the Python SDK.
@@ -65,10 +67,13 @@ func parseTraceFile(path string) ([]TraceEvent, error) {
 			DurationMs: raw.DurationMs,
 		}
 		if raw.Type == "model_call" && (raw.ProviderFamily != "" || raw.Model != "" || raw.CanonicalHash != "") {
+			promptTokens, completionTokens := extractModelCallTokens(raw)
 			event.ModelCall = &ModelCallEvent{
-				ProviderFamily: raw.ProviderFamily,
-				Model:          raw.Model,
-				CanonicalHash:  raw.CanonicalHash,
+				ProviderFamily:   raw.ProviderFamily,
+				Model:            raw.Model,
+				CanonicalHash:    raw.CanonicalHash,
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
 			}
 		} else if raw.Type == "sdk_capabilities" {
 			var capabilities SDKCapabilities
@@ -84,6 +89,84 @@ func parseTraceFile(path string) ([]TraceEvent, error) {
 		events = append(events, event)
 	}
 	return events, scanner.Err()
+}
+
+func extractModelCallTokens(raw rawSDKEvent) (int, int) {
+	if raw.PromptTokens > 0 || raw.CompletionTokens > 0 {
+		return raw.PromptTokens, raw.CompletionTokens
+	}
+	prompt, completion := extractTokenPair(raw.Metadata)
+	if prompt > 0 || completion > 0 {
+		return prompt, completion
+	}
+	return extractTokenPair(raw.Result)
+}
+
+func extractTokenPair(payload json.RawMessage) (int, int) {
+	if len(payload) == 0 {
+		return 0, 0
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return 0, 0
+	}
+	prompt := firstTokenValue(raw, [][]string{
+		{"prompt_tokens"},
+		{"usage", "prompt_tokens"},
+		{"usage", "input_tokens"},
+		{"usage", "inputTokens"},
+		{"usageMetadata", "promptTokenCount"},
+		{"meta", "billed_units", "input_tokens"},
+	})
+	completion := firstTokenValue(raw, [][]string{
+		{"completion_tokens"},
+		{"usage", "completion_tokens"},
+		{"usage", "output_tokens"},
+		{"usage", "outputTokens"},
+		{"usageMetadata", "candidatesTokenCount"},
+		{"meta", "billed_units", "output_tokens"},
+	})
+	return prompt, completion
+}
+
+func firstTokenValue(raw map[string]interface{}, paths [][]string) int {
+	for _, path := range paths {
+		if value, ok := tokenValueAtPath(raw, path); ok {
+			return value
+		}
+	}
+	return 0
+}
+
+func tokenValueAtPath(raw map[string]interface{}, path []string) (int, bool) {
+	var cur interface{} = raw
+	for _, part := range path {
+		asMap, ok := cur.(map[string]interface{})
+		if !ok {
+			return 0, false
+		}
+		next, ok := asMap[part]
+		if !ok {
+			return 0, false
+		}
+		cur = next
+	}
+	switch n := cur.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		parsed, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(parsed), true
+	default:
+		return 0, false
+	}
 }
 
 // CLIAdapter is the "Good" and "Minimal" integration level adapter.

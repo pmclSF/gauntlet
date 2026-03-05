@@ -108,9 +108,11 @@ type TraceEvent struct {
 
 // ModelCallEvent records details of a model API call.
 type ModelCallEvent struct {
-	ProviderFamily string `json:"provider_family"`
-	Model          string `json:"model"`
-	CanonicalHash  string `json:"canonical_hash"`
+	ProviderFamily   string `json:"provider_family"`
+	Model            string `json:"model"`
+	CanonicalHash    string `json:"canonical_hash"`
+	PromptTokens     int    `json:"prompt_tokens,omitempty"`
+	CompletionTokens int    `json:"completion_tokens,omitempty"`
 }
 
 // SDKCapabilities reports adapter instrumentation support negotiated from SDK
