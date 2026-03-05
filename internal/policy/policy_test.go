@@ -138,8 +138,8 @@ baselines_dir: evals/baselines/smoke
 	if resolved.TUT.WorkDir != root {
 		assertSamePath(t, resolved.TUT.WorkDir, root, "TUT.WorkDir")
 	}
-	if resolved.ProxyAddr != "localhost:7431" {
-		t.Fatalf("ProxyAddr = %q, want localhost:7431", resolved.ProxyAddr)
+	if resolved.ProxyAddr != "localhost:0" {
+		t.Fatalf("ProxyAddr = %q, want localhost:0", resolved.ProxyAddr)
 	}
 }
 
