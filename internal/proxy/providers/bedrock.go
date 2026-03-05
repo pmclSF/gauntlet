@@ -131,3 +131,15 @@ func (n *BedrockNormalizer) Normalize(hostname, path string, headers map[string]
 func (n *BedrockNormalizer) DenormalizeResponse(canonical []byte, providerFamily string) ([]byte, error) {
 	return canonical, nil
 }
+
+func (n *BedrockNormalizer) ExtractUsage(response []byte) (promptTokens int, completionTokens int) {
+	return extractUsageTokens(
+		response,
+		[][]string{{"usage", "inputTokens"}, {"usage", "prompt_tokens"}},
+		[][]string{{"usage", "outputTokens"}, {"usage", "completion_tokens"}},
+	)
+}
+
+func (n *BedrockNormalizer) NormalizeResponseForFixture(response []byte) ([]byte, error) {
+	return response, nil
+}

@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -79,12 +80,14 @@ type TraceWriter interface {
 
 // TraceEntry is a single intercepted call record.
 type TraceEntry struct {
-	Timestamp      time.Time `json:"timestamp"`
-	ProviderFamily string    `json:"provider_family"`
-	Model          string    `json:"model"`
-	CanonicalHash  string    `json:"canonical_hash"`
-	FixtureHit     bool      `json:"fixture_hit"`
-	DurationMs     int       `json:"duration_ms"`
+	Timestamp        time.Time `json:"timestamp"`
+	ProviderFamily   string    `json:"provider_family"`
+	Model            string    `json:"model"`
+	CanonicalHash    string    `json:"canonical_hash"`
+	FixtureHit       bool      `json:"fixture_hit"`
+	DurationMs       int       `json:"duration_ms"`
+	PromptTokens     int       `json:"prompt_tokens,omitempty"`
+	CompletionTokens int       `json:"completion_tokens,omitempty"`
 }
 
 // directClient bypasses HTTP_PROXY/HTTPS_PROXY env vars to prevent the proxy
@@ -177,6 +180,11 @@ func (p *Proxy) Traces() []TraceEntry {
 
 // EnvVars returns the environment variables to inject into the TUT process.
 func (p *Proxy) EnvVars(caCertPath string) []string {
+	proxyPort := ""
+	if _, port, err := net.SplitHostPort(p.Addr); err == nil {
+		proxyPort = port
+	}
+
 	vars := []string{
 		"HTTP_PROXY=http://" + p.Addr,
 		"HTTPS_PROXY=http://" + p.Addr,
@@ -184,10 +192,15 @@ func (p *Proxy) EnvVars(caCertPath string) []string {
 		"http_proxy=http://" + p.Addr,
 		"https_proxy=http://" + p.Addr,
 		"all_proxy=http://" + p.Addr,
+	}
+	if proxyPort != "" {
+		vars = append(vars, "GAUNTLET_PROXY_PORT="+proxyPort)
+	}
+	vars = append(vars,
 		// Clear no_proxy so localhost/loopback requests are still routed via proxy.
 		"NO_PROXY=",
 		"no_proxy=",
-	}
+	)
 	if p.CA != nil {
 		vars = append(vars, p.CA.EnvVars(caCertPath)...)
 	}
@@ -407,48 +420,56 @@ func (p *Proxy) interceptRequest(hostname, path string, headers map[string]strin
 
 	switch p.Mode {
 	case ModeRecorded:
-		return p.handleRecorded(canonical, canonicalBytes, hash, start)
+		return p.handleRecorded(normalizer, canonical, canonicalBytes, hash, start)
 	case ModeLive:
-		return p.handleLive(hostname, path, headers, body, canonical, canonicalBytes, hash, start)
+		return p.handleLive(normalizer, hostname, path, headers, body, canonical, canonicalBytes, hash, start)
 	default:
 		return p.handlePassthrough(hostname, path, headers, body)
 	}
 }
 
-func (p *Proxy) handleRecorded(canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
+func (p *Proxy) handleRecorded(normalizer providers.ProviderNormalizer, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
 	f, err := p.Store.GetModelFixture(hash)
 	if err != nil {
 		return nil, 0, err
 	}
 	if f == nil {
 		candidates, _ := p.Store.NearestModelFixtureCandidates(canonical.ProviderFamily, canonical.Model, hash, 3)
+		modelVersionHint := p.modelVersionHint(canonicalBytes, canonical.Model, candidates)
 		return nil, 0, &fixture.ErrFixtureMiss{
-			FixtureType:    "model:" + canonical.Model,
-			ProviderFamily: canonical.ProviderFamily,
-			Model:          canonical.Model,
-			CanonicalHash:  hash,
-			CanonicalJSON:  string(canonicalBytes),
-			RecordCmd:      "GAUNTLET_MODEL_MODE=live gauntlet record --suite smoke",
-			Candidates:     candidates,
+			FixtureType:      "model:" + canonical.Model,
+			ProviderFamily:   canonical.ProviderFamily,
+			Model:            canonical.Model,
+			CanonicalHash:    hash,
+			CanonicalJSON:    string(canonicalBytes),
+			RecordCmd:        "GAUNTLET_MODEL_MODE=live gauntlet record --suite smoke",
+			Candidates:       candidates,
+			ModelVersionHint: modelVersionHint,
 		}
 	}
+	normalizedResponse, err := normalizer.NormalizeResponseForFixture(f.Response)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to normalize recorded response: %w", err)
+	}
+	promptTokens, completionTokens := normalizer.ExtractUsage(normalizedResponse)
 
 	p.recordTrace(TraceEntry{
-		Timestamp:      start,
-		ProviderFamily: canonical.ProviderFamily,
-		Model:          canonical.Model,
-		CanonicalHash:  hash,
-		FixtureHit:     true,
-		DurationMs:     int(time.Since(start).Milliseconds()),
+		Timestamp:        start,
+		ProviderFamily:   canonical.ProviderFamily,
+		Model:            canonical.Model,
+		CanonicalHash:    hash,
+		FixtureHit:       true,
+		DurationMs:       int(time.Since(start).Milliseconds()),
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
 	})
 
-	return f.Response, 200, nil
+	return normalizedResponse, 200, nil
 }
 
-func (p *Proxy) handleLive(hostname, path string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
-	// Strip stream:true so the upstream API returns a single JSON response
-	// rather than SSE chunks. This lets us record a complete fixture.
-	body = stripStreamFlag(body)
+func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, hostname, path string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
+	// Normalize streaming requests so recording captures single-response fixtures.
+	path, body = stripStreamFlag(path, canonical.ProviderFamily, body)
 
 	url := "https://" + hostname + path
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -469,12 +490,17 @@ func (p *Proxy) handleLive(hostname, path string, headers map[string]string, bod
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to read live response: %w", err)
 	}
-	if err := fixture.ValidateModelResponse(canonical.ProviderFamily, respBody); err != nil {
+	promptTokens, completionTokens := normalizer.ExtractUsage(respBody)
+	normalizedResponse, err := normalizer.NormalizeResponseForFixture(respBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to normalize live response: %w", err)
+	}
+	if err := fixture.ValidateModelResponse(canonical.ProviderFamily, normalizedResponse); err != nil {
 		return nil, 0, fmt.Errorf("model response schema validation failed: %w", err)
 	}
 
 	// Redact before recording
-	redactedResp, _ := p.Redactor.RedactJSON(respBody)
+	redactedResp, _ := p.Redactor.RedactJSON(normalizedResponse)
 
 	// Record as fixture
 	f := &fixture.ModelFixture{
@@ -496,15 +522,17 @@ func (p *Proxy) handleLive(hostname, path string, headers map[string]string, bod
 	}
 
 	p.recordTrace(TraceEntry{
-		Timestamp:      start,
-		ProviderFamily: canonical.ProviderFamily,
-		Model:          canonical.Model,
-		CanonicalHash:  hash,
-		FixtureHit:     false,
-		DurationMs:     int(time.Since(start).Milliseconds()),
+		Timestamp:        start,
+		ProviderFamily:   canonical.ProviderFamily,
+		Model:            canonical.Model,
+		CanonicalHash:    hash,
+		FixtureHit:       false,
+		DurationMs:       int(time.Since(start).Milliseconds()),
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
 	})
 
-	return respBody, resp.StatusCode, nil
+	return normalizedResponse, resp.StatusCode, nil
 }
 
 func (p *Proxy) handlePassthrough(hostname, path string, headers map[string]string, body []byte) ([]byte, int, error) {
@@ -527,6 +555,50 @@ func (p *Proxy) handlePassthrough(hostname, path string, headers map[string]stri
 	return respBody, resp.StatusCode, err
 }
 
+func (p *Proxy) modelVersionHint(requestedCanonical []byte, requestedModel string, candidates []fixture.FixtureMissCandidate) string {
+	recordSuite := strings.TrimSpace(p.Suite)
+	if recordSuite == "" {
+		recordSuite = "smoke"
+	}
+	requestedModel = strings.TrimSpace(requestedModel)
+
+	for _, candidate := range candidates {
+		recordedModel := strings.TrimSpace(candidate.Model)
+		if recordedModel == "" || strings.EqualFold(recordedModel, requestedModel) {
+			continue
+		}
+		recordedFixture, err := p.Store.GetModelFixture(candidate.CanonicalHash)
+		if err != nil || recordedFixture == nil || len(recordedFixture.CanonicalRequest) == 0 {
+			continue
+		}
+		match, cmpErr := canonicalEquivalentIgnoringModel(requestedCanonical, recordedFixture.CanonicalRequest)
+		if cmpErr != nil || !match {
+			continue
+		}
+		return fmt.Sprintf(
+			"may be a model version change: recorded with %s, requesting %s. Run: gauntlet record --suite %s",
+			recordedModel,
+			requestedModel,
+			recordSuite,
+		)
+	}
+	return ""
+}
+
+func canonicalEquivalentIgnoringModel(leftCanonical, rightCanonical []byte) (bool, error) {
+	var left map[string]interface{}
+	if err := json.Unmarshal(leftCanonical, &left); err != nil {
+		return false, err
+	}
+	var right map[string]interface{}
+	if err := json.Unmarshal(rightCanonical, &right); err != nil {
+		return false, err
+	}
+	delete(left, "model")
+	delete(right, "model")
+	return reflect.DeepEqual(left, right), nil
+}
+
 func (p *Proxy) recordTrace(entry TraceEntry) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -546,31 +618,40 @@ func (p *Proxy) tunnelDirect(clientConn net.Conn, hostname string) {
 	io.Copy(clientConn, serverConn)
 }
 
-// stripStreamFlag removes "stream":true from a JSON request body so the
-// upstream API returns a single JSON response instead of SSE chunks.
-// Returns the original body unchanged if it's not valid JSON or has no stream field.
-func stripStreamFlag(body []byte) []byte {
+// stripStreamFlag normalizes provider streaming requests for fixture recording.
+// For OpenAI-compatible APIs, stream=true is removed (or forced false for
+// Ollama-native /api endpoints). For Gemini, streaming path suffixes are
+// rewritten to non-streaming equivalents.
+func stripStreamFlag(path, providerFamily string, body []byte) (string, []byte) {
+	if strings.EqualFold(strings.TrimSpace(providerFamily), "google") {
+		return providers.RewriteGeminiStreamingPath(path), body
+	}
+
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body
+		return path, body
 	}
 	raw, ok := parsed["stream"]
 	if !ok {
-		return body
+		return path, body
 	}
 	val := strings.TrimSpace(string(raw))
 	if val != "true" {
-		return body
+		return path, body
 	}
-	delete(parsed, "stream")
+	if strings.HasPrefix(path, "/api/chat") || strings.HasPrefix(path, "/api/generate") {
+		parsed["stream"] = json.RawMessage("false")
+	} else {
+		delete(parsed, "stream")
+	}
 	// stream_options is only valid when stream=true on OpenAI-compatible APIs.
 	// Remove it alongside stream to keep live recording requests valid.
 	delete(parsed, "stream_options")
 	out, err := json.Marshal(parsed)
 	if err != nil {
-		return body
+		return path, body
 	}
-	return out
+	return path, out
 }
 
 func headerMap(h http.Header) map[string]string {
