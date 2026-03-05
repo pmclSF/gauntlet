@@ -33,6 +33,10 @@ Install the SDK:
 pip install gauntlet-sdk  # or: pip install -e path/to/gauntlet/sdk/python
 ```
 
+Loopback proxy note: `gauntlet.connect()` patches `requests` and `httpx` to force
+local-model traffic (for example `localhost:11434`) through Gauntlet. If your
+agent uses `urllib3` or `aiohttp` directly, configure proxy routing manually.
+
 ## 4. Wrap your tools
 
 ```python
