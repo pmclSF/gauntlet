@@ -14,6 +14,8 @@ planner changes, Gauntlet detects regressions before they ship.
 
 This is not an eval dashboard. It is a test runner with a gate.
 
+Maintainers: release steps are documented in [RELEASING.md](RELEASING.md).
+
 ---
 
 ## Quickstart (10 minutes)
