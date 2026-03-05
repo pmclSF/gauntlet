@@ -13,7 +13,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/gauntlet-dev/gauntlet/internal/discovery"
+	"github.com/pmclSF/gauntlet/internal/discovery"
 	"gopkg.in/yaml.v3"
 )
 

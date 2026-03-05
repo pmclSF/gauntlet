@@ -23,3 +23,4 @@ evals/runs/
 node_modules/
 .claude/
 .DS_Store
+/gauntlet

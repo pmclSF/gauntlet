@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/assertions"
 )
 
 // ---------------------------------------------------------------------------

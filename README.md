@@ -21,11 +21,11 @@ This is not an eval dashboard. It is a test runner with a gate.
 ### 1. Install
 
 ```bash
-# macOS/Linux
-curl -fsSL https://gauntlet.dev/install.sh | sh
+# Install with Go
+go install github.com/pmclSF/gauntlet/cmd/gauntlet@latest
 
 # Or build from source
-git clone https://github.com/gauntlet-dev/gauntlet.git
+git clone https://github.com/pmclSF/gauntlet.git
 cd gauntlet && make build
 export PATH="$PWD/bin:$PATH"
 

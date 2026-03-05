@@ -1,6 +1,6 @@
 package output
 
-import "github.com/gauntlet-dev/gauntlet/internal/assertions"
+import "github.com/pmclSF/gauntlet/internal/assertions"
 
 // ClassifyCulprit attempts to identify the most likely cause of a failure.
 func ClassifyCulprit(results []assertions.Result, worldTools map[string]string) *Culprit {

@@ -1,4 +1,4 @@
-module github.com/gauntlet-dev/gauntlet
+module github.com/pmclSF/gauntlet
 
 go 1.24.0
 

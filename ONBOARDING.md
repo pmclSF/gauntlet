@@ -5,7 +5,7 @@
 ### 1. Install Gauntlet
 
 ```bash
-go install github.com/gauntlet-dev/gauntlet/cmd/gauntlet@latest
+go install github.com/pmclSF/gauntlet/cmd/gauntlet@latest
 ```
 
 ### 2. Enable Gauntlet in your project

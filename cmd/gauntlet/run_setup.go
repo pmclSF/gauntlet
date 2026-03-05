@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,13 +11,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/gauntlet-dev/gauntlet/internal/ci"
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/policy"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy"
-	"github.com/gauntlet-dev/gauntlet/internal/runner"
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/ci"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/policy"
+	"github.com/pmclSF/gauntlet/internal/proxy"
+	"github.com/pmclSF/gauntlet/internal/runner"
+	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 func loadPolicyIfPresent(configPath, suite string, explicit bool) (*policy.Resolved, error) {
@@ -125,6 +126,16 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 	store := fixture.NewStore(fixturesDir)
 	scenarioDigest := computeScenarioSetDigest(cfg.SuiteDir)
 	store.SetReplayContext(cfg.Suite, scenarioDigest)
+	cfg.TUTConfig.Env["GAUNTLET_RUNNER_MODE"] = strings.TrimSpace(cfg.Mode)
+	if suite := strings.TrimSpace(cfg.Suite); suite != "" {
+		cfg.TUTConfig.Env["GAUNTLET_SUITE"] = suite
+	}
+	if scenarioDigest != "" {
+		cfg.TUTConfig.Env["GAUNTLET_SCENARIO_SET_SHA256"] = scenarioDigest
+	}
+	cfg.TUTConfig.Env["GAUNTLET_REPLAY_LOCKFILE"] = filepath.Join(fixturesDir, fixture.DefaultReplayLockfileName)
+	cfg.TUTConfig.Env["GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE"] = "0"
+	cfg.TUTConfig.Env["GAUNTLET_REQUIRE_FIXTURE_SIGNATURES"] = "0"
 
 	signingKeyPath := effectiveFixtureSigningKeyPath(cfg.ConfigPath)
 	if proxyMode == proxy.ModeLive {
@@ -148,6 +159,11 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 				effectiveFixtureTrustedPublicKeyPath(signingKeyPath),
 			)
 		}
+		if err := fixture.VerifyReplayLockfile(store, cfg.Suite, scenarioDigest, ""); err != nil {
+			return nil, fmt.Errorf("replay integrity check failed: %w\n  Regenerate lockfile with: gauntlet lock-fixtures --suite %s --config %s", err, cfg.Suite, cfg.ConfigPath)
+		}
+		cfg.TUTConfig.Env["GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE"] = "1"
+		cfg.TUTConfig.Env["GAUNTLET_REQUIRE_FIXTURE_SIGNATURES"] = "1"
 	}
 
 	caDir := filepath.Join(filepath.Dir(cfg.ConfigPath), ".gauntlet")
@@ -280,12 +296,16 @@ func computeScenarioSetDigest(suiteDir string) string {
 	if err != nil {
 		return ""
 	}
-	names := make([]string, 0, len(scenarios))
+	entries := make([]string, 0, len(scenarios))
 	for _, s := range scenarios {
-		names = append(names, s.Name)
+		payload, marshalErr := json.Marshal(s)
+		if marshalErr != nil {
+			return ""
+		}
+		entries = append(entries, fmt.Sprintf("%s:%s", strings.TrimSpace(s.Name), fixture.Hash(payload)))
 	}
-	sort.Strings(names)
-	return fixture.ScenarioSetDigest(names)
+	sort.Strings(entries)
+	return fixture.Hash([]byte(strings.Join(entries, "\n")))
 }
 
 func toBoolSet(items []string) map[string]bool {

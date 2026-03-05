@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 func TestModeConstants(t *testing.T) {

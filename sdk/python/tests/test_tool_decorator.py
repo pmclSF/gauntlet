@@ -5,11 +5,13 @@ when a fixture is available (Patch 1 requirement).
 """
 
 import json
+import hashlib
 import os
 import tempfile
 import pytest
 
 import gauntlet
+import gauntlet.decorators as decorators
 
 
 class TestToolDecorator:
@@ -17,12 +19,20 @@ class TestToolDecorator:
 
     def setup_method(self):
         """Set up a temporary fixture directory and enable Gauntlet."""
+        decorators._fixture_lock_loaded = False
+        decorators._fixture_lock_index = {}
         self.tmpdir = tempfile.mkdtemp()
         self.original_env = {}
         for key in [
             "GAUNTLET_ENABLED",
             "GAUNTLET_MODEL_MODE",
             "GAUNTLET_FIXTURE_DIR",
+            "GAUNTLET_REPLAY_LOCKFILE",
+            "GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE",
+            "GAUNTLET_REQUIRE_FIXTURE_SIGNATURES",
+            "GAUNTLET_TRUSTED_RECORDER_IDENTITIES",
+            "GAUNTLET_SUITE",
+            "GAUNTLET_SCENARIO_SET_SHA256",
         ]:
             self.original_env[key] = os.environ.get(key)
 
@@ -50,6 +60,21 @@ class TestToolDecorator:
         }
         with open(fixture_path, "w") as f:
             json.dump(fixture_data, f)
+
+    def _write_lockfile(self, entries: list):
+        lock_path = os.path.join(self.tmpdir, "replay.lock.json")
+        lock_data = {
+            "version": 1,
+            "generated_at": "2026-03-05T00:00:00Z",
+            "fixtures_dir": self.tmpdir,
+            "suite": "smoke",
+            "scenario_set_sha256": "digest-1",
+            "entries": entries,
+            "index_sha256": "unused-for-sdk-checks",
+        }
+        with open(lock_path, "w") as f:
+            json.dump(lock_data, f)
+        os.environ["GAUNTLET_REPLAY_LOCKFILE"] = lock_path
 
     def _get_hash_for_tool(self, tool_name: str, args: dict) -> str:
         """Compute the fixture hash for a tool call."""
@@ -134,6 +159,8 @@ class TestToolDecorator:
     def test_live_mode_calls_real_function_and_records(self):
         """In live mode, the real function runs and the result is saved."""
         os.environ["GAUNTLET_MODEL_MODE"] = "live"
+        os.environ["GAUNTLET_SUITE"] = "smoke"
+        os.environ["GAUNTLET_SCENARIO_SET_SHA256"] = "digest-1"
 
         @gauntlet.tool(name="live_tool")
         def live_func(query: str) -> dict:
@@ -150,6 +177,61 @@ class TestToolDecorator:
         with open(fixture_path) as f:
             saved = json.load(f)
         assert saved["response"] == {"answer": "response to test"}
+        assert saved["args"] == {"query": "test"}
+        assert saved["suite"] == "smoke"
+        assert saved["scenario_set_sha256"] == "digest-1"
+        assert saved["provenance"]["recorder_identity"] != ""
+
+    def test_recorded_mode_rejects_fixture_not_indexed_in_lockfile(self):
+        os.environ["GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE"] = "1"
+        os.environ["GAUNTLET_SUITE"] = "smoke"
+        os.environ["GAUNTLET_SCENARIO_SET_SHA256"] = "digest-1"
+
+        @gauntlet.tool(name="lock_required_tool")
+        def lookup(order_id: str) -> dict:
+            return {"order_id": order_id}
+
+        fixture_hash = self._get_hash_for_tool(
+            "lock_required_tool", {"order_id": "ord-001"}
+        )
+        self._write_fixture(fixture_hash, {"order_id": "ord-001"})
+        self._write_lockfile(entries=[])
+
+        with pytest.raises(RuntimeError, match="not present in replay lockfile"):
+            lookup(order_id="ord-001")
+
+    def test_recorded_mode_rejects_fixture_sha_mismatch(self):
+        os.environ["GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE"] = "1"
+        os.environ["GAUNTLET_SUITE"] = "smoke"
+        os.environ["GAUNTLET_SCENARIO_SET_SHA256"] = "digest-1"
+
+        @gauntlet.tool(name="sha_guard_tool")
+        def lookup(order_id: str) -> dict:
+            return {"order_id": order_id}
+
+        fixture_hash = self._get_hash_for_tool(
+            "sha_guard_tool", {"order_id": "ord-001"}
+        )
+        self._write_fixture(fixture_hash, {"order_id": "ord-001"})
+        fixture_path = os.path.join(self.tmpdir, f"{fixture_hash}.json")
+        with open(fixture_path, "rb") as f:
+            expected_sha = hashlib.sha256(f.read()).hexdigest()
+        self._write_lockfile(
+            entries=[
+                {
+                    "path": f"tools/{fixture_hash}.json",
+                    "fixture_type": "tool",
+                    "canonical_hash": fixture_hash,
+                    "sha256": expected_sha,
+                    "size": 0,
+                }
+            ]
+        )
+        with open(fixture_path, "w") as f:
+            json.dump({"canonical_hash": fixture_hash, "response": {"tampered": True}}, f)
+
+        with pytest.raises(RuntimeError, match="does not match replay lockfile index"):
+            lookup(order_id="ord-001")
 
     def test_denylist_fields_stripped_from_hash(self):
         """Denylisted fields should not affect the fixture hash."""

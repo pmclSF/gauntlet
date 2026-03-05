@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 func TestEnsureAutoSuite_GeneratesToolAndDBScenarios(t *testing.T) {

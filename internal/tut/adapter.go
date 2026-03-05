@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 // IntegrationLevel describes how deeply the TUT is integrated with Gauntlet.

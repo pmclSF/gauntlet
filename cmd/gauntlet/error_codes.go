@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/fixture"
 )
 
 const (

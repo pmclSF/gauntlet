@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/fixture"
 )
 
 func TestNormalizeCLIErrorCode(t *testing.T) {

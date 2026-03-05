@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 // ValidateVariantPolicy checks that at most one tool or DB is in a non-nominal

@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 // rawSDKEvent matches the JSON format emitted by the Python SDK's events.py.

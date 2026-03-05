@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 func TestNearestModelFixtureCandidates_PrioritizesProviderAndModel(t *testing.T) {
