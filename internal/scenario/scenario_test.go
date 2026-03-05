@@ -132,6 +132,40 @@ assertions:
 	}
 }
 
+func TestScenarioYAMLParsing_MultimodalMessageContent(t *testing.T) {
+	raw := `
+scenario: multimodal_test
+input:
+  messages:
+    - role: user
+      content:
+        - type: text
+          text: "describe this image"
+        - type: image_url
+          image_url:
+            url: "data:image/png;base64,AQI="
+world:
+  tools: {}
+assertions:
+  - type: tool_sequence
+    required: ["order_lookup"]
+`
+	var s Scenario
+	if err := yaml.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(s.Input.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(s.Input.Messages))
+	}
+	content, ok := s.Input.Messages[0].Content.([]interface{})
+	if !ok {
+		t.Fatalf("expected multimodal content array, got %T", s.Input.Messages[0].Content)
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(content))
+	}
+}
+
 func TestScenarioYAMLParsing_AssertionInlineFields(t *testing.T) {
 	raw := `
 scenario: inline_test

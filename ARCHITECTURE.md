@@ -214,3 +214,28 @@ The proxy intercepts calls to localhost:* and loopback addresses.
 In recorded mode: calls to localhost:11434 (Ollama) return fixtures.
 In live mode: calls to localhost:11434 are forwarded to the real server.
 The model server must be running in live mode. In recorded mode, it need not exist.
+
+## Streaming behavior
+
+Gauntlet records deterministic, non-streaming model fixtures.
+
+- OpenAI-compatible requests: `stream:true` is removed before live forwarding.
+- Ollama native `/api/chat` and `/api/generate`: `stream:true` is forced to `false`.
+- Gemini requests:
+  - live streaming path `:streamGenerateContent` is rewritten to `:generateContent`
+  - the original request canonical form includes `extra.original_path_was_streaming=true`
+  - streaming chunk responses are merged into a single candidate text response for fixture storage.
+
+This means replay mode validates functional outputs and tool behavior, not client-side
+stream-consumption behavior.
+
+## Multi-modal inputs
+
+Canonical request hashing supports text + image/document content parts.
+
+- Inline images are decoded and hashed (`sha256(raw_bytes)`), then stored as `image_hash`.
+- Remote image/file references store the URI string in `image_hash`.
+- Raw base64 payloads are never stored in canonical request fixtures.
+
+Two semantically identical images with different base64 padding/format normalize to
+the same content hash, so fixture lookup is stable across SDK/client encoding differences.
