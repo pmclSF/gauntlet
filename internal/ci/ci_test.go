@@ -203,10 +203,10 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 		t.Error("sign-artifacts step must appear before upload step")
 	}
 	requiredPins := []string{
-		"actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
-		"actions/setup-go@479c797a328a0dfa73d811c5d9d2d8aa7b69b838",
-		"actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d",
-		"actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+		"actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+		"actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a",
+		"actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38",
+		"actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08",
 	}
 	for _, pin := range requiredPins {
 		if !strings.Contains(workflowText, pin) {
