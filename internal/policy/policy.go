@@ -215,7 +215,7 @@ func LoadWithOptions(path string, suite string, opts LoadOptions) (*Resolved, er
 		AssertionMode:           assertionMode,
 	}
 	if res.ProxyAddr == "" {
-		res.ProxyAddr = "localhost:7431"
+		res.ProxyAddr = "localhost:0"
 	}
 
 	return res, nil

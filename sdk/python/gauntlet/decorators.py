@@ -15,6 +15,7 @@ import inspect
 import json
 import os
 import sys
+import threading
 import time
 from typing import Any, Callable, Optional
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ DENYLIST_PREFIXES = ("metadata.", "extra_headers.")
 
 _fixture_lock_loaded = False
 _fixture_lock_index = {}
+_lock_index_lock = threading.Lock()
 
 
 def _env_flag(name: str) -> bool:
@@ -93,61 +95,68 @@ def _load_tool_lock_index() -> dict:
     if _fixture_lock_loaded:
         return _fixture_lock_index
 
-    _fixture_lock_loaded = True
-    _fixture_lock_index = {}
-    lockfile_path = _replay_lockfile_path()
-    if not os.path.exists(lockfile_path):
-        if _required_tool_lockfile():
+    with _lock_index_lock:
+        if _fixture_lock_loaded:
+            return _fixture_lock_index
+
+        loaded_index = {}
+        lockfile_path = _replay_lockfile_path()
+        if not os.path.exists(lockfile_path):
+            if _required_tool_lockfile():
+                raise RuntimeError(
+                    "tool fixture replay requires replay lockfile but file is "
+                    f"missing: {lockfile_path}"
+                )
+            _fixture_lock_index = loaded_index
+            _fixture_lock_loaded = True
+            return _fixture_lock_index
+
+        with open(lockfile_path, "r") as f:
+            lockfile = json.load(f)
+        if not isinstance(lockfile, dict):
             raise RuntimeError(
-                "tool fixture replay requires replay lockfile but file is "
-                f"missing: {lockfile_path}"
+                f"invalid replay lockfile format: {lockfile_path}"
             )
+
+        expected_suite = _expected_suite()
+        lock_suite = str(lockfile.get("suite", "")).strip()
+        if expected_suite and lock_suite and lock_suite != expected_suite:
+            raise RuntimeError(
+                "replay lockfile suite mismatch for tool replay: "
+                f"lockfile={lock_suite} expected={expected_suite}"
+            )
+        expected_digest = _expected_scenario_set_sha256()
+        lock_digest = str(lockfile.get("scenario_set_sha256", "")).strip()
+        if expected_digest and lock_digest and lock_digest != expected_digest:
+            raise RuntimeError(
+                "replay lockfile scenario_set_sha256 mismatch for tool replay: "
+                f"lockfile={lock_digest} expected={expected_digest}"
+            )
+
+        entries = lockfile.get("entries", [])
+        if not isinstance(entries, list):
+            raise RuntimeError(
+                f"invalid replay lockfile entries format: {lockfile_path}"
+            )
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("fixture_type", "")).strip() != "tool":
+                continue
+            canonical_hash = str(entry.get("canonical_hash", "")).strip().lower()
+            sha256 = str(entry.get("sha256", "")).strip().lower()
+            if not canonical_hash or not sha256:
+                continue
+            prev = loaded_index.get(canonical_hash)
+            if prev and prev != sha256:
+                raise RuntimeError(
+                    "replay lockfile has conflicting sha256 values for tool "
+                    f"fixture hash {canonical_hash}"
+                )
+            loaded_index[canonical_hash] = sha256
+        _fixture_lock_index = loaded_index
+        _fixture_lock_loaded = True
         return _fixture_lock_index
-
-    with open(lockfile_path, "r") as f:
-        lockfile = json.load(f)
-    if not isinstance(lockfile, dict):
-        raise RuntimeError(
-            f"invalid replay lockfile format: {lockfile_path}"
-        )
-
-    expected_suite = _expected_suite()
-    lock_suite = str(lockfile.get("suite", "")).strip()
-    if expected_suite and lock_suite and lock_suite != expected_suite:
-        raise RuntimeError(
-            "replay lockfile suite mismatch for tool replay: "
-            f"lockfile={lock_suite} expected={expected_suite}"
-        )
-    expected_digest = _expected_scenario_set_sha256()
-    lock_digest = str(lockfile.get("scenario_set_sha256", "")).strip()
-    if expected_digest and lock_digest and lock_digest != expected_digest:
-        raise RuntimeError(
-            "replay lockfile scenario_set_sha256 mismatch for tool replay: "
-            f"lockfile={lock_digest} expected={expected_digest}"
-        )
-
-    entries = lockfile.get("entries", [])
-    if not isinstance(entries, list):
-        raise RuntimeError(
-            f"invalid replay lockfile entries format: {lockfile_path}"
-        )
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("fixture_type", "")).strip() != "tool":
-            continue
-        canonical_hash = str(entry.get("canonical_hash", "")).strip().lower()
-        sha256 = str(entry.get("sha256", "")).strip().lower()
-        if not canonical_hash or not sha256:
-            continue
-        prev = _fixture_lock_index.get(canonical_hash)
-        if prev and prev != sha256:
-            raise RuntimeError(
-                "replay lockfile has conflicting sha256 values for tool "
-                f"fixture hash {canonical_hash}"
-            )
-        _fixture_lock_index[canonical_hash] = sha256
-    return _fixture_lock_index
 
 
 def _validate_fixture_signature_presence(fixture_path: str, fixture_data: dict):

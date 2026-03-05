@@ -335,6 +335,32 @@ func TestParseTraceFile_ModelCallMetadata(t *testing.T) {
 	}
 }
 
+func TestParseTraceFile_ModelCallTokenUsage(t *testing.T) {
+	tracePath := filepath.Join(t.TempDir(), "trace.ndjson")
+	line := `{"gauntlet_event":true,"type":"model_call","timestamp":1735689600.25,"provider_family":"openai","model":"gpt-4o","canonical_hash":"abc123","result":{"id":"resp_1","usage":{"prompt_tokens":42,"completion_tokens":9}},"duration_ms":17}`
+	if err := os.WriteFile(tracePath, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	events, err := parseTraceFile(tracePath)
+	if err != nil {
+		t.Fatalf("parseTraceFile: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	event := events[0]
+	if event.ModelCall == nil {
+		t.Fatal("expected model call metadata")
+	}
+	if event.ModelCall.PromptTokens != 42 {
+		t.Fatalf("PromptTokens = %d, want 42", event.ModelCall.PromptTokens)
+	}
+	if event.ModelCall.CompletionTokens != 9 {
+		t.Fatalf("CompletionTokens = %d, want 9", event.ModelCall.CompletionTokens)
+	}
+}
+
 func TestParseTraceFile_SDKCapabilities(t *testing.T) {
 	tracePath := filepath.Join(t.TempDir(), "trace.ndjson")
 	line := `{"gauntlet_event":true,"type":"sdk_capabilities","timestamp":1735689600.5,"result":{"protocol_version":1,"sdk":"gauntlet-python","runtime":"python3.11","adapters":{"openai":{"enabled":true,"patched":false,"reason":"openai_not_installed"}}}}`
