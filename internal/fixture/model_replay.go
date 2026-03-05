@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 // ModelReplay intercepts model calls (via proxy) and serves fixture responses.

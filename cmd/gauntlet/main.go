@@ -11,18 +11,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gauntlet-dev/gauntlet/internal/api"
-	"github.com/gauntlet-dev/gauntlet/internal/baseline"
-	"github.com/gauntlet-dev/gauntlet/internal/ci"
-	"github.com/gauntlet-dev/gauntlet/internal/discovery"
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/output"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy"
-	"github.com/gauntlet-dev/gauntlet/internal/redaction"
-	"github.com/gauntlet-dev/gauntlet/internal/runner"
-	"github.com/gauntlet-dev/gauntlet/internal/scaffold"
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/api"
+	"github.com/pmclSF/gauntlet/internal/baseline"
+	"github.com/pmclSF/gauntlet/internal/ci"
+	"github.com/pmclSF/gauntlet/internal/discovery"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/output"
+	"github.com/pmclSF/gauntlet/internal/proxy"
+	"github.com/pmclSF/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/runner"
+	"github.com/pmclSF/gauntlet/internal/scaffold"
+	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 var version = "0.1.0"
@@ -52,6 +52,7 @@ func main() {
 		newRunCmd(),
 		newDoctorCmd(),
 		newEnableCmd(),
+		newInitCmd(),
 		newBaselineCmd(),
 		newCheckBaselineApprovalCmd(),
 		newRecordCmd(),
@@ -94,6 +95,20 @@ func newRunCmd() *cobra.Command {
 			resolved, err := loadPolicyIfPresent(configPath, suite, cmd.Flags().Changed("config"))
 			if err != nil {
 				return err
+			}
+
+			if resolved == nil && !cmd.Flags().Changed("config") {
+				if _, statErr := os.Stat("evals"); os.IsNotExist(statErr) {
+					fmt.Println("No gauntlet.yaml or evals/ directory found.")
+					fmt.Println()
+					fmt.Println("Get started:")
+					fmt.Println("  gauntlet init       Generate CI workflow and policy files")
+					fmt.Println("  gauntlet discover   Scan your codebase for tools and scenarios")
+					fmt.Println("  gauntlet run        Run the test suite")
+					fmt.Println()
+					fmt.Println("See: docs/quickstart.md")
+					return nil
+				}
 			}
 
 			mode, err = resolveRunnerMode(runnerMode, mode, resolved)
@@ -203,6 +218,24 @@ func newEnableCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "enable",
 		Short: "Generate CI workflow and policy files",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			result, err := ci.Enable(cwd)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Generated:\n  %s\n  %s\n", result.WorkflowPath, result.PolicyPath)
+			ci.PrintOnboardingChecklist(result.Framework)
+			return nil
+		},
+	}
+}
+
+func newInitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Initialize Gauntlet in the current project (alias for enable)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			result, err := ci.Enable(cwd)
@@ -489,9 +522,16 @@ func newRecordCmd() *cobra.Command {
 			}
 
 			if runResult != nil {
-				fixturesDir := filepath.Join(filepath.Dir(configPath), "fixtures")
+				fixturesDir := effectiveFixturesDir(&cfg)
 				fmt.Printf("\nRecording complete: %d scenarios executed\n", len(runResult.Scenarios))
 				fmt.Printf("  Fixtures saved to: %s\n", fixturesDir)
+				signingKeyPath := effectiveFixtureSigningKeyPath(configPath)
+				signStore := fixture.NewStore(fixturesDir)
+				modelsSigned, toolsSigned, signErr := fixture.SignFixtures(signStore, signingKeyPath)
+				if signErr != nil {
+					return fmt.Errorf("failed to sign recorded fixtures: %w", signErr)
+				}
+				fmt.Printf("  Fixtures signed: models=%d tools=%d\n", modelsSigned, toolsSigned)
 				if lockPath, lockErr := writeReplayLockfileFromConfig(cfg, fixturesDir, ""); lockErr == nil {
 					fmt.Printf("  Replay lockfile: %s\n", lockPath)
 				} else {

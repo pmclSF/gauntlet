@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
-	"github.com/gauntlet-dev/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/redaction"
 )
 
 // Mode determines how the proxy handles intercepted requests.

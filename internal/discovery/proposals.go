@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	schemas "github.com/gauntlet-dev/gauntlet/schema"
+	schemas "github.com/pmclSF/gauntlet/schema"
 	"github.com/xeipuuv/gojsonschema"
 	"gopkg.in/yaml.v3"
 )

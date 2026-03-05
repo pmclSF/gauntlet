@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gauntlet-dev/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/redaction"
 )
 
 // WriteArtifactBundle writes a per-failure artifact bundle for a scenario.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 // ---------------------------------------------------------------------------

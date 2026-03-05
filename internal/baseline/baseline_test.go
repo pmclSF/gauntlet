@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 // ---------------------------------------------------------------------------

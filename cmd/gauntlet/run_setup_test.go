@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/policy"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
-	"github.com/gauntlet-dev/gauntlet/internal/runner"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/policy"
+	"github.com/pmclSF/gauntlet/internal/proxy"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/runner"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 func TestLoadPolicyIfPresent_DefaultMissingReturnsNil(t *testing.T) {
@@ -133,6 +133,41 @@ func TestApplyResolvedPolicy(t *testing.T) {
 	}
 	if !cfg.SoftSignals["sensitive_leak"] {
 		t.Fatalf("expected sensitive_leak soft signal from policy")
+	}
+}
+
+func TestComputeScenarioSetDigest_ChangesWhenScenarioContentChanges(t *testing.T) {
+	suiteDir := t.TempDir()
+	path := filepath.Join(suiteDir, "scenario.yaml")
+	first := `scenario: order_status
+input:
+  messages:
+    - role: user
+      content: "status for ord-001"
+`
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	digestA := computeScenarioSetDigest(suiteDir)
+	if digestA == "" {
+		t.Fatal("expected non-empty scenario digest")
+	}
+
+	second := `scenario: order_status
+input:
+  messages:
+    - role: user
+      content: "status for ord-002"
+`
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatalf("rewrite scenario: %v", err)
+	}
+	digestB := computeScenarioSetDigest(suiteDir)
+	if digestB == "" {
+		t.Fatal("expected non-empty scenario digest after rewrite")
+	}
+	if digestA == digestB {
+		t.Fatalf("expected digest to change when scenario content changes, got %q", digestA)
 	}
 }
 

@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/policy"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy"
-	"github.com/gauntlet-dev/gauntlet/internal/runner"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/policy"
+	"github.com/pmclSF/gauntlet/internal/proxy"
+	"github.com/pmclSF/gauntlet/internal/runner"
 )
 
 var (

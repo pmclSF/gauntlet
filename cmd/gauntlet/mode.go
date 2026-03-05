@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/ci"
-	"github.com/gauntlet-dev/gauntlet/internal/policy"
+	"github.com/pmclSF/gauntlet/internal/ci"
+	"github.com/pmclSF/gauntlet/internal/policy"
 )
 
 const (

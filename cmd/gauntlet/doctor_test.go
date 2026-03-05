@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/fixture"
-	"github.com/gauntlet-dev/gauntlet/internal/proxy"
-	"github.com/gauntlet-dev/gauntlet/internal/runner"
+	"github.com/pmclSF/gauntlet/internal/fixture"
+	"github.com/pmclSF/gauntlet/internal/proxy"
+	"github.com/pmclSF/gauntlet/internal/runner"
 )
 
 func TestRunDoctor_FailsRecordedModeWithoutReplayLockfile(t *testing.T) {

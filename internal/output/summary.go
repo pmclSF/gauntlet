@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/redaction"
 )
 
 // WriteSummary writes a GitHub-flavored Markdown summary.

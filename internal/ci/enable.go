@@ -244,11 +244,11 @@ jobs:
 
       - name: Install Gauntlet
         run: |
-          go install github.com/gauntlet-dev/gauntlet/cmd/gauntlet@latest
+          go install github.com/pmclSF/gauntlet/cmd/gauntlet@latest
 
       - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install gauntlet-sdk
 
       - name: Fetch PR base ref
@@ -265,20 +265,27 @@ jobs:
             --required-label "gauntlet/baseline-approved"
 
       - name: Run Gauntlet smoke suite
-        run: gauntlet run --suite smoke --mode pr_ci
+        run: |
+          if ! command -v unshare >/dev/null 2>&1; then
+            echo "unshare is required for hermetic pr_ci mode egress isolation" >&2
+            exit 1
+          fi
+          unshare --net /bin/sh -lc 'ip link set lo up 2>/dev/null; gauntlet run --suite smoke --mode pr_ci'
         env:
           GAUNTLET_MODEL_MODE: recorded
 
       - name: Scan artifacts for sensitive content
+        id: scan_artifacts
         if: always()
         run: gauntlet scan-artifacts --dir evals
 
       - name: Sign evidence bundle
-        if: always()
+        id: sign_artifacts
+        if: ${{ always() && steps.scan_artifacts.outcome == 'success' }}
         run: gauntlet sign-artifacts --dir evals/runs
 
       - name: Upload results
-        if: always()
+        if: ${{ always() && steps.scan_artifacts.outcome == 'success' && steps.sign_artifacts.outcome == 'success' }}
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.0
         with:
           name: gauntlet-results

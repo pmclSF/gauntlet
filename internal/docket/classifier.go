@@ -3,7 +3,7 @@ package docket
 import (
 	"sort"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/assertions"
 )
 
 // Classify assigns docket tags to a set of assertion results.

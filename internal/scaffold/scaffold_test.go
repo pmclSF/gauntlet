@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/discovery"
+	"github.com/pmclSF/gauntlet/internal/discovery"
 )
 
 func TestGenerate_NoProposals(t *testing.T) {

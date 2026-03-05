@@ -3,7 +3,7 @@ package docket
 import (
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/assertions"
 )
 
 func TestClassifyNoFailures(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gauntlet-dev/gauntlet/internal/baseline"
+	"github.com/pmclSF/gauntlet/internal/baseline"
 )
 
 func newCheckBaselineApprovalCmd() *cobra.Command {

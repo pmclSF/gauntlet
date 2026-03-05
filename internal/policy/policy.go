@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/tut"
 	"gopkg.in/yaml.v3"
 )
 
