@@ -1,4 +1,5 @@
 name: CI
+# Build, test, and integration-test the Gauntlet codebase
 on:
   push:
     branches: [main]
