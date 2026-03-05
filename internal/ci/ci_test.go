@@ -89,6 +89,7 @@ func TestDetectMode_PushNonMain(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_EVENT_NAME", "push")
 	t.Setenv("GITHUB_REF", "refs/heads/feature/test")
+	t.Setenv("GITHUB_REF_NAME", "feature/test")
 
 	mode := DetectMode()
 	if mode != "pr_ci" {
@@ -173,11 +174,11 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	if !strings.Contains(workflowText, "id: sign_artifacts") {
 		t.Error("workflow should assign sign_artifacts step id for upload gating")
 	}
-	if !strings.Contains(workflowText, "if: ${{ always() && steps.scan_artifacts.outcome == 'success' }}") {
-		t.Error("sign-artifacts step must be gated on successful scan-artifacts step")
+	if !strings.Contains(workflowText, "continue-on-error: true") {
+		t.Error("sign-artifacts step should continue-on-error so artifact upload still runs")
 	}
-	if !strings.Contains(workflowText, "if: ${{ always() && steps.scan_artifacts.outcome == 'success' && steps.sign_artifacts.outcome == 'success' }}") {
-		t.Error("upload step must be gated on successful scan + sign steps")
+	if !strings.Contains(workflowText, "name: Upload results\n        if: always()") {
+		t.Error("upload step must always run so results are available for debugging")
 	}
 	if !strings.Contains(workflowText, "gauntlet check-baseline-approval") {
 		t.Error("workflow should enforce baseline approval policy for baseline-changing PRs")
@@ -227,6 +228,10 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Error("policy file is empty")
+	}
+	policyText := string(data)
+	if !strings.Contains(policyText, `addr: "localhost:0"`) {
+		t.Error("policy template should default proxy addr to localhost:0 for concurrent runs")
 	}
 }
 
