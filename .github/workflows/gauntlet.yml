@@ -1,6 +1,7 @@
 name: CI
 # Build, test, and integration-test the Gauntlet codebase
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
