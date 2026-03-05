@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 // MigrationOptions controls fixture hash migration behavior.

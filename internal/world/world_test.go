@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 	"gopkg.in/yaml.v3"
 )
 

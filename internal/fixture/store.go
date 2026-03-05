@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/proxy/providers"
+	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 // ModelFixture is a recorded model call with canonical and raw forms.

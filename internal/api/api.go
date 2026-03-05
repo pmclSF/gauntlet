@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/baseline"
-	"github.com/gauntlet-dev/gauntlet/internal/discovery"
-	"github.com/gauntlet-dev/gauntlet/internal/iopairs"
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/baseline"
+	"github.com/pmclSF/gauntlet/internal/discovery"
+	"github.com/pmclSF/gauntlet/internal/iopairs"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 // Server is the Gauntlet API server.

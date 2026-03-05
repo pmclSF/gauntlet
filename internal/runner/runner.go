@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
-	"github.com/gauntlet-dev/gauntlet/internal/baseline"
-	"github.com/gauntlet-dev/gauntlet/internal/determinism"
-	"github.com/gauntlet-dev/gauntlet/internal/docket"
-	"github.com/gauntlet-dev/gauntlet/internal/output"
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
-	"github.com/gauntlet-dev/gauntlet/internal/world"
+	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/baseline"
+	"github.com/pmclSF/gauntlet/internal/determinism"
+	"github.com/pmclSF/gauntlet/internal/docket"
+	"github.com/pmclSF/gauntlet/internal/output"
+	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/world"
 )
 
 // Config holds runner configuration from gauntlet.yml and CLI flags.

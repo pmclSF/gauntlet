@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gauntlet-dev/gauntlet/internal/iopairs"
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
-	"github.com/gauntlet-dev/gauntlet/internal/world"
+	"github.com/pmclSF/gauntlet/internal/iopairs"
+	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/world"
 	"gopkg.in/yaml.v3"
 )
 

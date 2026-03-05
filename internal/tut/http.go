@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 )
 
 // HTTPAdapter is the "Best" and "Good" integration level adapter.

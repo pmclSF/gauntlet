@@ -155,8 +155,29 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	if !strings.Contains(workflowText, "gauntlet scan-artifacts --dir evals") {
 		t.Error("workflow should run gauntlet scan-artifacts before upload")
 	}
+	if !strings.Contains(workflowText, "go install github.com/pmclSF/gauntlet/cmd/gauntlet@") {
+		t.Error("workflow should install gauntlet CLI via go install")
+	}
+	if !strings.Contains(workflowText, "pip install gauntlet-sdk") {
+		t.Error("workflow should install gauntlet-sdk")
+	}
+	if !strings.Contains(workflowText, "command -v unshare") || !strings.Contains(workflowText, "unshare --net /bin/sh -lc") {
+		t.Error("workflow should run pr_ci suite inside a network namespace for hermetic egress")
+	}
 	if !strings.Contains(workflowText, "gauntlet sign-artifacts --dir evals/runs") {
 		t.Error("workflow should sign artifact evidence bundle before upload")
+	}
+	if !strings.Contains(workflowText, "id: scan_artifacts") {
+		t.Error("workflow should assign scan_artifacts step id for gating")
+	}
+	if !strings.Contains(workflowText, "id: sign_artifacts") {
+		t.Error("workflow should assign sign_artifacts step id for upload gating")
+	}
+	if !strings.Contains(workflowText, "if: ${{ always() && steps.scan_artifacts.outcome == 'success' }}") {
+		t.Error("sign-artifacts step must be gated on successful scan-artifacts step")
+	}
+	if !strings.Contains(workflowText, "if: ${{ always() && steps.scan_artifacts.outcome == 'success' && steps.sign_artifacts.outcome == 'success' }}") {
+		t.Error("upload step must be gated on successful scan + sign steps")
 	}
 	if !strings.Contains(workflowText, "gauntlet check-baseline-approval") {
 		t.Error("workflow should enforce baseline approval policy for baseline-changing PRs")

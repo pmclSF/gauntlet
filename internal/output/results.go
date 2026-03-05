@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gauntlet-dev/gauntlet/internal/assertions"
-	"github.com/gauntlet-dev/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/redaction"
 )
 
 // RunResult is the top-level results.json structure.

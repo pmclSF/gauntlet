@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gauntlet-dev/gauntlet/internal/policy"
+	"github.com/pmclSF/gauntlet/internal/policy"
 )
 
 func TestResolveRunnerMode_ExplicitOverridesPolicy(t *testing.T) {

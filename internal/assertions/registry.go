@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"sort"
 
-	"github.com/gauntlet-dev/gauntlet/internal/scenario"
-	"github.com/gauntlet-dev/gauntlet/internal/tut"
+	"github.com/pmclSF/gauntlet/internal/scenario"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 // Assertion evaluates a single check against a scenario run.
