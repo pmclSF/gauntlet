@@ -53,18 +53,25 @@ func (r *ModelReplay) Replay(cr *providers.CanonicalRequest) (*ModelFixture, err
 			Candidates:     candidates,
 		}
 	}
+	normalizer := providers.NormalizerForFamily(cr.ProviderFamily)
+	normalizedResponse, err := normalizer.NormalizeResponseForFixture(fixture.Response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to normalize fixture response for %s: %w", cr.ProviderFamily, err)
+	}
+	fixtureCopy := *fixture
+	fixtureCopy.Response = normalizedResponse
 
 	// Record trace
 	r.Traces = append(r.Traces, ModelCallTrace{
 		ProviderFamily: cr.ProviderFamily,
 		Model:          cr.Model,
 		CanonicalHash:  hash,
-		Response:       fixture.Response,
+		Response:       fixtureCopy.Response,
 		FixtureUsed:    fixture.CanonicalHash,
 		Timestamp:      time.Now(),
 	})
 
-	return fixture, nil
+	return &fixtureCopy, nil
 }
 
 // Reset clears recorded traces for a new scenario.

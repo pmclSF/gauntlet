@@ -118,3 +118,15 @@ func (n *CohereNormalizer) Normalize(hostname, path string, headers map[string]s
 func (n *CohereNormalizer) DenormalizeResponse(canonical []byte, providerFamily string) ([]byte, error) {
 	return canonical, nil
 }
+
+func (n *CohereNormalizer) ExtractUsage(response []byte) (promptTokens int, completionTokens int) {
+	return extractUsageTokens(
+		response,
+		[][]string{{"meta", "billed_units", "input_tokens"}, {"usage", "prompt_tokens"}},
+		[][]string{{"meta", "billed_units", "output_tokens"}, {"usage", "completion_tokens"}},
+	)
+}
+
+func (n *CohereNormalizer) NormalizeResponseForFixture(response []byte) ([]byte, error) {
+	return response, nil
+}

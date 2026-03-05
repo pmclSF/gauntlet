@@ -136,6 +136,7 @@ func TestEnvVarsWithoutCA(t *testing.T) {
 		"http_proxy=http://127.0.0.1:8080",
 		"https_proxy=http://127.0.0.1:8080",
 		"all_proxy=http://127.0.0.1:8080",
+		"GAUNTLET_PROXY_PORT=8080",
 		"NO_PROXY=",
 		"no_proxy=",
 	}
@@ -166,9 +167,9 @@ func TestEnvVarsWithCA(t *testing.T) {
 	certPath := "/tmp/ca.pem"
 	vars := p.EnvVars(certPath)
 
-	// Should have 8 proxy vars + 4 CA vars
-	if len(vars) != 12 {
-		t.Fatalf("EnvVars(): expected 12 entries with CA, got %d: %v", len(vars), vars)
+	// Should have 9 proxy vars + 4 CA vars
+	if len(vars) != 13 {
+		t.Fatalf("EnvVars(): expected 13 entries with CA, got %d: %v", len(vars), vars)
 	}
 
 	// Check that CA env vars are included
@@ -228,12 +229,14 @@ func TestHeaderMapMultipleValues(t *testing.T) {
 func TestTraceEntryFields(t *testing.T) {
 	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	entry := TraceEntry{
-		Timestamp:      ts,
-		ProviderFamily: "anthropic",
-		Model:          "claude-3-opus",
-		CanonicalHash:  "hash123",
-		FixtureHit:     true,
-		DurationMs:     150,
+		Timestamp:        ts,
+		ProviderFamily:   "anthropic",
+		Model:            "claude-3-opus",
+		CanonicalHash:    "hash123",
+		FixtureHit:       true,
+		DurationMs:       150,
+		PromptTokens:     123,
+		CompletionTokens: 45,
 	}
 
 	if entry.Timestamp != ts {
@@ -253,6 +256,12 @@ func TestTraceEntryFields(t *testing.T) {
 	}
 	if entry.DurationMs != 150 {
 		t.Errorf("DurationMs: got %d, want 150", entry.DurationMs)
+	}
+	if entry.PromptTokens != 123 {
+		t.Errorf("PromptTokens: got %d, want 123", entry.PromptTokens)
+	}
+	if entry.CompletionTokens != 45 {
+		t.Errorf("CompletionTokens: got %d, want 45", entry.CompletionTokens)
 	}
 }
 
@@ -543,6 +552,77 @@ func TestHandleHTTP_FixtureMissIncludesNearestCandidateGuidance(t *testing.T) {
 	}
 }
 
+func TestHandleHTTP_TraceIncludesTokenUsage(t *testing.T) {
+	store := fixture.NewStore(t.TempDir())
+	requestBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
+
+	normalizer := providers.Detect("api.openai.com", "/v1/chat/completions", []byte(requestBody), providers.AllNormalizers())
+	canonical, err := normalizer.Normalize("api.openai.com", "/v1/chat/completions", nil, []byte(requestBody))
+	if err != nil {
+		t.Fatalf("normalize request: %v", err)
+	}
+	canonicalBytes, err := fixture.CanonicalizeRequest(canonical)
+	if err != nil {
+		t.Fatalf("canonicalize request: %v", err)
+	}
+	hash := fixture.HashCanonical(canonicalBytes)
+	if err := store.PutModelFixture(&fixture.ModelFixture{
+		FixtureID:        hash,
+		HashVersion:      1,
+		CanonicalHash:    hash,
+		ProviderFamily:   canonical.ProviderFamily,
+		Model:            canonical.Model,
+		CanonicalRequest: canonicalBytes,
+		Response:         json.RawMessage(`{"usage":{"prompt_tokens":11,"completion_tokens":7},"choices":[{"message":{"role":"assistant","content":"ok"}}]}`),
+		RecordedAt:       time.Now().UTC(),
+		RecordedBy:       "test",
+	}); err != nil {
+		t.Fatalf("put fixture: %v", err)
+	}
+
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(requestBody))
+	req.Host = "api.openai.com"
+	w := httptest.NewRecorder()
+	p.handleHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Result().StatusCode, http.StatusOK)
+	}
+	traces := p.Traces()
+	if len(traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(traces))
+	}
+	if traces[0].PromptTokens != 11 || traces[0].CompletionTokens != 7 {
+		t.Fatalf("trace token usage = (%d,%d), want (11,7)", traces[0].PromptTokens, traces[0].CompletionTokens)
+	}
+}
+
+func TestHandleHTTP_FixtureMissIncludesModelVersionHint(t *testing.T) {
+	store := fixture.NewStore(t.TempDir())
+	recordedBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}`
+	seedOpenAIRecordedFixture(t, store, recordedBody)
+
+	missingBody := `{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`
+	p := NewProxy("127.0.0.1:0", ModeRecorded, store, nil)
+	req := httptest.NewRequest("POST", "http://api.openai.com/v1/chat/completions", strings.NewReader(missingBody))
+	req.Host = "api.openai.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Result().StatusCode, http.StatusBadGateway)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "may be a model version change: recorded with gpt-4o-mini, requesting gpt-4.1") {
+		t.Fatalf("expected model-version hint in fixture miss body, got: %s", body)
+	}
+	if !strings.Contains(body, "Run: gauntlet record --suite smoke") {
+		t.Fatalf("expected model-version hint record command, got: %s", body)
+	}
+}
+
 func TestHandleDecryptedConnection_HTTP2PrefaceReturns505(t *testing.T) {
 	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
 	client, server := net.Pipe()
@@ -629,52 +709,93 @@ func TestHandleDecryptedConnection_MaxRequestsPerConnection(t *testing.T) {
 
 func TestStripStreamFlag(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantHas string // substring that should be present
-		wantNot string // substring that should be absent
+		name        string
+		path        string
+		provider    string
+		input       string
+		wantHas     string // substring that should be present
+		wantNot     string // substring that should be absent
+		wantOutPath string
 	}{
 		{
-			name:    "strips stream true",
-			input:   `{"model":"gpt-4","stream":true,"messages":[]}`,
-			wantHas: `"model"`,
-			wantNot: `"stream"`,
+			name:        "strips stream true",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `{"model":"gpt-4","stream":true,"messages":[]}`,
+			wantHas:     `"model"`,
+			wantNot:     `"stream"`,
+			wantOutPath: "/v1/chat/completions",
 		},
 		{
-			name:    "strips stream options with stream true",
-			input:   `{"model":"gpt-4o","stream":true,"stream_options":{"include_usage":true},"messages":[]}`,
-			wantHas: `"model"`,
-			wantNot: `"stream_options"`,
+			name:        "strips stream options with stream true",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `{"model":"gpt-4o","stream":true,"stream_options":{"include_usage":true},"messages":[]}`,
+			wantHas:     `"model"`,
+			wantNot:     `"stream_options"`,
+			wantOutPath: "/v1/chat/completions",
 		},
 		{
-			name:    "keeps stream false",
-			input:   `{"model":"gpt-4","stream":false,"messages":[]}`,
-			wantHas: `"stream"`,
+			name:        "keeps stream false",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `{"model":"gpt-4","stream":false,"messages":[]}`,
+			wantHas:     `"stream"`,
+			wantOutPath: "/v1/chat/completions",
 		},
 		{
-			name:    "keeps stream string true unchanged",
-			input:   `{"model":"gpt-4","stream":"true","messages":[]}`,
-			wantHas: `"stream":"true"`,
+			name:        "keeps stream string true unchanged",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `{"model":"gpt-4","stream":"true","messages":[]}`,
+			wantHas:     `"stream":"true"`,
+			wantOutPath: "/v1/chat/completions",
 		},
 		{
-			name:    "no stream field",
-			input:   `{"model":"gpt-4","messages":[]}`,
-			wantHas: `"model"`,
+			name:        "no stream field",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `{"model":"gpt-4","messages":[]}`,
+			wantHas:     `"model"`,
+			wantOutPath: "/v1/chat/completions",
 		},
 		{
-			name:    "invalid json unchanged",
-			input:   `not json`,
-			wantHas: `not json`,
+			name:        "invalid json unchanged",
+			path:        "/v1/chat/completions",
+			provider:    "openai_compatible",
+			input:       `not json`,
+			wantHas:     `not json`,
+			wantOutPath: "/v1/chat/completions",
+		},
+		{
+			name:        "ollama stream forced false",
+			path:        "/api/chat",
+			provider:    "openai_compatible",
+			input:       `{"model":"llama3.2","stream":true,"messages":[]}`,
+			wantHas:     `"stream":false`,
+			wantOutPath: "/api/chat",
+		},
+		{
+			name:        "gemini path rewritten",
+			path:        "/v1beta/models/gemini-2.0-flash:streamGenerateContent",
+			provider:    "google",
+			input:       `{"contents":[]}`,
+			wantHas:     `"contents"`,
+			wantOutPath: "/v1beta/models/gemini-2.0-flash:generateContent",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := string(stripStreamFlag([]byte(tt.input)))
+			outPath, outBody := stripStreamFlag(tt.path, tt.provider, []byte(tt.input))
+			got := string(outBody)
 			if tt.wantHas != "" && !strings.Contains(got, tt.wantHas) {
 				t.Errorf("expected %q in result: %s", tt.wantHas, got)
 			}
 			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
 				t.Errorf("did not expect %q in result: %s", tt.wantNot, got)
+			}
+			if tt.wantOutPath != "" && outPath != tt.wantOutPath {
+				t.Errorf("path = %q, want %q", outPath, tt.wantOutPath)
 			}
 		})
 	}

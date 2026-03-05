@@ -75,13 +75,14 @@ type FixtureMissCandidate struct {
 // ErrFixtureMiss is returned when no fixture matches the canonical hash.
 // This is always a hard failure — never falls back to live calls.
 type ErrFixtureMiss struct {
-	FixtureType    string
-	ProviderFamily string
-	Model          string
-	CanonicalHash  string
-	CanonicalJSON  string
-	RecordCmd      string
-	Candidates     []FixtureMissCandidate
+	FixtureType      string
+	ProviderFamily   string
+	Model            string
+	CanonicalHash    string
+	CanonicalJSON    string
+	RecordCmd        string
+	Candidates       []FixtureMissCandidate
+	ModelVersionHint string
 }
 
 func (e *ErrFixtureMiss) Error() string {
@@ -107,6 +108,9 @@ func (e *ErrFixtureMiss) Error() string {
 				candidate.Distance,
 			)
 		}
+	}
+	if strings.TrimSpace(e.ModelVersionHint) != "" {
+		fmt.Fprintf(&b, "  Hint: %s\n", strings.TrimSpace(e.ModelVersionHint))
 	}
 	fmt.Fprintf(&b, `  To record this fixture:
     %s

@@ -1,6 +1,9 @@
 import datetime
+import concurrent.futures
 import importlib
 import time
+
+import pytest
 
 
 def _reload_connect_module():
@@ -67,6 +70,40 @@ def test_connect_is_idempotent(monkeypatch):
     connect_module.disconnect()
 
 
+def test_connect_thread_safe_single_connected_state(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("GAUNTLET_FREEZE_TIME", "2025-01-15T10:00:00Z")
+
+    connect_module = _reload_connect_module()
+
+    def _call_connect(_):
+        connect_module.connect()
+        return len(connect_module._patchers)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        patch_counts = list(executor.map(_call_connect, range(20)))
+
+    assert connect_module._connected is True
+    assert len(connect_module._patchers) >= 4
+    assert all(count == len(connect_module._patchers) for count in patch_counts)
+    connect_module.disconnect()
+
+
+def test_connect_keeps_monotonic_advancing(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("GAUNTLET_FREEZE_TIME", "2025-01-15T10:00:00Z")
+
+    connect_module = _reload_connect_module()
+    connect_module.connect()
+
+    first = time.monotonic()
+    time.sleep(0.01)
+    second = time.monotonic()
+    assert second > first
+
+    connect_module.disconnect()
+
+
 def test_connect_forces_proxy_env_for_loopback(monkeypatch):
     monkeypatch.setenv("GAUNTLET_ENABLED", "1")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7431")
@@ -83,6 +120,31 @@ def test_connect_forces_proxy_env_for_loopback(monkeypatch):
     assert connect_module.os.environ.get("no_proxy") == ""
 
     connect_module.disconnect()
+
+
+def test_connect_patches_httpx_loopback_proxy_if_available(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7431")
+
+    connect_module = _reload_connect_module()
+    connect_module.connect()
+
+    try:
+        import httpx
+    except ImportError:
+        connect_module.disconnect()
+        pytest.skip("httpx not installed")
+
+    client = httpx.Client()
+    proxies = getattr(client, "proxies", None)
+    client.close()
+    connect_module.disconnect()
+
+    assert proxies is not None
+    if isinstance(proxies, dict):
+        assert proxies.get("all://") == "http://127.0.0.1:7431"
+    else:
+        assert "127.0.0.1:7431" in str(proxies)
 
 
 def test_connect_emits_sdk_capability_report(monkeypatch):
