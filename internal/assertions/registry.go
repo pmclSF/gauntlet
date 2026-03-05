@@ -132,4 +132,5 @@ func init() {
 	Register(&ForbiddenToolAssertion{})
 	Register(&OutputDerivableAssertion{})
 	Register(&SensitiveLeakAssertion{})
+	Register(&TokenBudgetAssertion{})
 }

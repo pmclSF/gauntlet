@@ -12,12 +12,13 @@ import (
 // Registry tests
 // ---------------------------------------------------------------------------
 
-func TestRegistryContainsAllSevenTypes(t *testing.T) {
+func TestRegistryContainsAllEightTypes(t *testing.T) {
 	expected := []string{
 		"output_schema",
 		"tool_sequence",
 		"tool_args_invariant",
 		"retry_cap",
+		"token_budget",
 		"forbidden_tool",
 		"output_derivable",
 		"sensitive_leak",
@@ -58,6 +59,7 @@ func TestIsSoftValues(t *testing.T) {
 		"tool_sequence",
 		"tool_args_invariant",
 		"retry_cap",
+		"token_budget",
 		"forbidden_tool",
 	}
 	for _, name := range hardTypes {
@@ -949,6 +951,95 @@ func TestForbiddenTool_Fail_FromSpec(t *testing.T) {
 	result := a.Evaluate(ctx)
 	if result.Passed {
 		t.Fatal("expected fail for forbidden tool from scenario spec")
+	}
+}
+
+func TestTokenBudget_Pass(t *testing.T) {
+	a := &TokenBudgetAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "model_call",
+				ModelCall: &tut.ModelCallEvent{PromptTokens: 100, CompletionTokens: 40},
+			},
+			{
+				EventType: "model_call",
+				ModelCall: &tut.ModelCallEvent{PromptTokens: 50, CompletionTokens: 10},
+			},
+		},
+		Spec: map[string]interface{}{
+			"max_prompt_tokens":     200,
+			"max_completion_tokens": 100,
+			"max_total_tokens":      300,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Fatalf("expected pass, got failure: %s", result.Message)
+	}
+}
+
+func TestTokenBudget_FailPrompt(t *testing.T) {
+	a := &TokenBudgetAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "model_call",
+				ModelCall: &tut.ModelCallEvent{PromptTokens: 210, CompletionTokens: 20},
+			},
+		},
+		Spec: map[string]interface{}{
+			"max_prompt_tokens": 200,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected prompt token budget failure")
+	}
+	if result.AssertionType != "token_budget" {
+		t.Fatalf("AssertionType = %q, want token_budget", result.AssertionType)
+	}
+}
+
+func TestTokenBudget_FailCompletion(t *testing.T) {
+	a := &TokenBudgetAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "model_call",
+				ModelCall: &tut.ModelCallEvent{PromptTokens: 100, CompletionTokens: 80},
+			},
+		},
+		Spec: map[string]interface{}{
+			"max_completion_tokens": 50,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected completion token budget failure")
+	}
+}
+
+func TestTokenBudget_FailTotal(t *testing.T) {
+	a := &TokenBudgetAssertion{}
+	ctx := Context{
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "model_call",
+				ModelCall: &tut.ModelCallEvent{PromptTokens: 140, CompletionTokens: 90},
+			},
+		},
+		Spec: map[string]interface{}{
+			"max_total_tokens": 200,
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected total token budget failure")
 	}
 }
 
