@@ -33,7 +33,16 @@
                 "enum": ["system", "user", "assistant"]
               },
               "content": {
-                "type": "string"
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                ]
               }
             }
           }
@@ -141,6 +150,18 @@
               "type": { "const": "retry_cap" },
               "tool": { "type": "string", "minLength": 1 },
               "max_retries": { "type": "integer", "minimum": 0 },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "token_budget" },
+              "max_prompt_tokens": { "type": "integer", "minimum": 0 },
+              "max_completion_tokens": { "type": "integer", "minimum": 0 },
+              "max_total_tokens": { "type": "integer", "minimum": 0 },
               "description": { "type": "string" }
             }
           },

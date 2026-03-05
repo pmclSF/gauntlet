@@ -19,7 +19,15 @@ type CanonicalRequest struct {
 // CanonicalMessage is a provider-agnostic chat message.
 type CanonicalMessage struct {
 	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string or []ContentBlock
+	Content interface{} `json:"content"` // string or []CanonicalContentPart
+}
+
+// CanonicalContentPart is a normalized multi-modal content fragment.
+type CanonicalContentPart struct {
+	Type      string `json:"type"` // "text" or "image"
+	Text      string `json:"text,omitempty"`
+	ImageHash string `json:"image_hash,omitempty"` // SHA-256 for inline bytes; URL/URI for remote refs
+	MimeType  string `json:"mime_type,omitempty"`
 }
 
 // ContentBlock represents a structured content block within a message.
@@ -59,4 +67,10 @@ type ProviderNormalizer interface {
 	// DenormalizeResponse converts a canonical fixture response back to the
 	// provider-specific response format for returning to the TUT.
 	DenormalizeResponse(canonical []byte, providerFamily string) ([]byte, error)
+	// ExtractUsage returns prompt/input and completion/output token counts from
+	// a provider response body. Missing values return 0.
+	ExtractUsage(response []byte) (promptTokens int, completionTokens int)
+	// NormalizeResponseForFixture canonicalizes provider responses before fixture
+	// storage/replay so non-deterministic metadata does not cause drift.
+	NormalizeResponseForFixture(response []byte) ([]byte, error)
 }

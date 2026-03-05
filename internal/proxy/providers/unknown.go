@@ -39,3 +39,11 @@ func (n *UnknownNormalizer) Normalize(hostname, path string, headers map[string]
 func (n *UnknownNormalizer) DenormalizeResponse(canonical []byte, providerFamily string) ([]byte, error) {
 	return canonical, nil
 }
+
+func (n *UnknownNormalizer) ExtractUsage(response []byte) (promptTokens int, completionTokens int) {
+	return 0, 0
+}
+
+func (n *UnknownNormalizer) NormalizeResponseForFixture(response []byte) ([]byte, error) {
+	return response, nil
+}

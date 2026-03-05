@@ -114,6 +114,22 @@ func TestModelReplayFixtureMissIncludesProviderModelAndCandidates(t *testing.T) 
 	}
 }
 
+func TestErrFixtureMissError_IncludesModelVersionHint(t *testing.T) {
+	errText := (&ErrFixtureMiss{
+		FixtureType:      "model:gpt-4.1",
+		ProviderFamily:   "openai_compatible",
+		Model:            "gpt-4.1",
+		CanonicalHash:    strings.Repeat("a", 64),
+		CanonicalJSON:    `{"model":"gpt-4.1","messages":[]}`,
+		RecordCmd:        "gauntlet record --suite smoke",
+		ModelVersionHint: "may be a model version change: recorded with gpt-4o-mini, requesting gpt-4.1. Run: gauntlet record --suite smoke",
+	}).Error()
+
+	if !strings.Contains(errText, "Hint: may be a model version change") {
+		t.Fatalf("expected model version hint in fixture miss error, got:\n%s", errText)
+	}
+}
+
 func writeCandidateFixtureMeta(t *testing.T, modelsDir, hash, providerFamily, model string) {
 	t.Helper()
 	content := map[string]string{
