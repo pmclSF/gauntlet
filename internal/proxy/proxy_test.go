@@ -136,6 +136,7 @@ func TestEnvVarsWithoutCA(t *testing.T) {
 		"http_proxy=http://127.0.0.1:8080",
 		"https_proxy=http://127.0.0.1:8080",
 		"all_proxy=http://127.0.0.1:8080",
+		"GAUNTLET_PROXY_PORT=8080",
 		"NO_PROXY=",
 		"no_proxy=",
 	}
@@ -166,9 +167,9 @@ func TestEnvVarsWithCA(t *testing.T) {
 	certPath := "/tmp/ca.pem"
 	vars := p.EnvVars(certPath)
 
-	// Should have 8 proxy vars + 4 CA vars
-	if len(vars) != 12 {
-		t.Fatalf("EnvVars(): expected 12 entries with CA, got %d: %v", len(vars), vars)
+	// Should have 9 proxy vars + 4 CA vars
+	if len(vars) != 13 {
+		t.Fatalf("EnvVars(): expected 13 entries with CA, got %d: %v", len(vars), vars)
 	}
 
 	// Check that CA env vars are included
