@@ -8,6 +8,7 @@ import json
 import hashlib
 import os
 import tempfile
+import concurrent.futures
 import pytest
 
 import gauntlet
@@ -232,6 +233,34 @@ class TestToolDecorator:
 
         with pytest.raises(RuntimeError, match="does not match replay lockfile index"):
             lookup(order_id="ord-001")
+
+    def test_load_tool_lock_index_thread_safe(self):
+        os.environ["GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE"] = "1"
+        os.environ["GAUNTLET_SUITE"] = "smoke"
+        os.environ["GAUNTLET_SCENARIO_SET_SHA256"] = "digest-1"
+
+        self._write_lockfile(
+            entries=[
+                {
+                    "path": "tools/abc123.json",
+                    "fixture_type": "tool",
+                    "canonical_hash": "abc123",
+                    "sha256": "def456",
+                    "size": 10,
+                }
+            ]
+        )
+        decorators._fixture_lock_loaded = False
+        decorators._fixture_lock_index = {}
+
+        def _load(_):
+            return decorators._load_tool_lock_index()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            loaded = list(executor.map(_load, range(20)))
+
+        assert all(index.get("abc123") == "def456" for index in loaded)
+        assert len({id(index) for index in loaded}) == 1
 
     def test_denylist_fields_stripped_from_hash(self):
         """Denylisted fields should not affect the fixture hash."""
