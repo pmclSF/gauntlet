@@ -166,7 +166,7 @@ func runDoctor(opts doctorOptions) (*doctorReport, error) {
 	} else {
 		addr := effectiveProxyAddr("", resolved)
 		if addr == "" {
-			addr = "localhost:7431"
+			addr = "localhost:0"
 		}
 		if err := doctorProxyBindCheckFn(addr); err != nil {
 			report.addCheck(doctorFail, "proxy_routing", err.Error(), "Use --runner-mode/--model-mode overrides or set proxy.addr to a bindable address like 127.0.0.1:0.")

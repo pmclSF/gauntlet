@@ -263,8 +263,52 @@ func TestStartProxyForRun_RecordedStartsProxyAndInjectsEnv(t *testing.T) {
 	if cfg.TUTConfig.Env["SSL_CERT_FILE"] == "" {
 		t.Fatal("expected SSL_CERT_FILE injected")
 	}
+	if got := cfg.TUTConfig.Env["GAUNTLET_PROXY_PORT"]; got == "" || got == "0" {
+		t.Fatalf("GAUNTLET_PROXY_PORT = %q, want resolved non-zero port", got)
+	}
 	if got := cfg.TUTConfig.Env["GAUNTLET_FIXTURE_DIR"]; !strings.HasSuffix(got, "/evals/fixtures/tools") {
 		t.Fatalf("GAUNTLET_FIXTURE_DIR = %q", got)
+	}
+}
+
+func TestStartProxyForRun_DefaultProxyAddrUsesEphemeralPort(t *testing.T) {
+	forceNonForkCIContext(t)
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "evals", "gauntlet.yml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	cfg := runner.Config{
+		ConfigPath: configPath,
+		TUTConfig:  tutConfigForTest(),
+	}
+	resolved := &policy.Resolved{
+		ModelMode: "recorded",
+	}
+
+	p, err := startProxyForRun(&cfg, resolved, "", "")
+	if err != nil {
+		t.Fatalf("startProxyForRun: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected proxy instance in recorded mode")
+	}
+	defer func() { _ = p.Stop() }()
+
+	_, port, splitErr := net.SplitHostPort(p.Addr)
+	if splitErr != nil {
+		t.Fatalf("proxy addr %q should include host:port: %v", p.Addr, splitErr)
+	}
+	if port == "0" || port == "" {
+		t.Fatalf("proxy addr should resolve to non-zero port, got %q", p.Addr)
+	}
+	if got := cfg.TUTConfig.Env["GAUNTLET_PROXY_PORT"]; got != port {
+		t.Fatalf("GAUNTLET_PROXY_PORT = %q, want %q", got, port)
 	}
 }
 

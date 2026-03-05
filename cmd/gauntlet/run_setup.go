@@ -112,7 +112,7 @@ func startProxyForRun(cfg *runner.Config, resolved *policy.Resolved, modelModeOv
 	}
 	addr := effectiveProxyAddr(proxyAddrOverride, resolved)
 	if addr == "" {
-		addr = "localhost:7431"
+		addr = "localhost:0"
 	}
 
 	if modelMode == "passthrough" {
