@@ -27,6 +27,7 @@ type ModelFixture struct {
 	CanonicalRequest  json.RawMessage   `json:"canonical_request"`
 	RawRequest        json.RawMessage   `json:"raw_request"`
 	Response          json.RawMessage   `json:"response"`
+	ResponseCode      int               `json:"response_code,omitempty"`
 	RecordedAt        time.Time         `json:"recorded_at"`
 	RecordedBy        string            `json:"recorded_by"`
 	IsBeta            bool              `json:"is_beta"`
