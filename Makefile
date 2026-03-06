@@ -10,10 +10,10 @@ build-ui:
 build: build-ui build-go
 
 build-go:
-	go build -o $(BINARY) ./cmd/gauntlet
+	go build -trimpath -o $(BINARY) ./cmd/gauntlet
 
 build-noui:
-	go build -tags noui -o $(BINARY) ./cmd/gauntlet
+	go build -trimpath -tags noui -o $(BINARY) ./cmd/gauntlet
 
 test:
 	go test ./... -v -race -timeout 120s
