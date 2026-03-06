@@ -1,9 +1,6 @@
 package providers
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "encoding/json"
 
 // UnknownNormalizer is the fallback for unrecognized providers.
 // It stores the raw request body as-is with a warning about hash instability.
@@ -17,20 +14,35 @@ func (n *UnknownNormalizer) Detect(hostname, path string, body []byte) bool {
 }
 
 func (n *UnknownNormalizer) Normalize(hostname, path string, headers map[string]string, body []byte) (*CanonicalRequest, error) {
-	var rawMap map[string]interface{}
-	if err := json.Unmarshal(body, &rawMap); err != nil {
-		return nil, fmt.Errorf("unknown provider: failed to parse request body as JSON: %w", err)
-	}
-
 	cr := &CanonicalRequest{
 		GauntletCanonicalVersion: 1,
 		ProviderFamily:           "unknown",
-		Extra:                    rawMap,
 	}
 
-	// Try to extract model if present
-	if m, ok := rawMap["model"].(string); ok {
-		cr.Model = m
+	// Try to parse as JSON; if the body is non-JSON or empty, store a
+	// raw-body fallback so live/passthrough modes don't fail.
+	if len(body) > 0 {
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal(body, &rawMap); err != nil {
+			// Non-JSON body — store as opaque string in Extra for hashing
+			cr.Extra = map[string]interface{}{
+				"_raw_body": string(body),
+				"_hostname": hostname,
+				"_path":     path,
+			}
+			return cr, nil
+		}
+		cr.Extra = rawMap
+		// Try to extract model if present
+		if m, ok := rawMap["model"].(string); ok {
+			cr.Model = m
+		}
+	} else {
+		// Empty body (e.g. GET requests) — use path for differentiation
+		cr.Extra = map[string]interface{}{
+			"_hostname": hostname,
+			"_path":     path,
+		}
 	}
 
 	return cr, nil

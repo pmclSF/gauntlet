@@ -9,44 +9,43 @@ import (
 	"time"
 
 	"github.com/pmclSF/gauntlet/internal/fixture"
-	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
 // handleRecorded looks up a fixture by canonical hash and returns the recorded
 // response. Returns the fixture's original HTTP status code, defaulting to 200
 // for backward compatibility with fixtures that predate status code recording.
-func (p *Proxy) handleRecorded(normalizer providers.ProviderNormalizer, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
-	f, err := p.Store.GetModelFixture(hash)
+func (p *Proxy) handleRecorded(ir *interceptedRequest) ([]byte, int, error) {
+	f, err := p.Store.GetModelFixture(ir.Hash)
 	if err != nil {
 		return nil, 0, err
 	}
 	if f == nil {
-		candidates, _ := p.Store.NearestModelFixtureCandidates(canonical.ProviderFamily, canonical.Model, hash, 3)
-		modelVersionHint := p.modelVersionHint(canonicalBytes, canonical.Model, candidates)
+		candidates, _ := p.Store.NearestModelFixtureCandidates(ir.Canonical.ProviderFamily, ir.Canonical.Model, ir.Hash, 3)
+		modelVersionHint := p.modelVersionHint(ir.CanonicalBytes, ir.Canonical.Model, candidates)
 		return nil, 0, &fixture.ErrFixtureMiss{
-			FixtureType:      "model:" + canonical.Model,
-			ProviderFamily:   canonical.ProviderFamily,
-			Model:            canonical.Model,
-			CanonicalHash:    hash,
-			CanonicalJSON:    string(canonicalBytes),
+			FixtureType:      "model:" + ir.Canonical.Model,
+			ProviderFamily:   ir.Canonical.ProviderFamily,
+			Model:            ir.Canonical.Model,
+			CanonicalHash:    ir.Hash,
+			CanonicalJSON:    string(ir.CanonicalBytes),
 			RecordCmd:        "GAUNTLET_MODEL_MODE=live gauntlet record --suite smoke",
 			Candidates:       candidates,
 			ModelVersionHint: modelVersionHint,
 		}
 	}
-	normalizedResponse, err := normalizer.NormalizeResponseForFixture(f.Response)
+	normalizedResponse, err := ir.Normalizer.NormalizeResponseForFixture(f.Response)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to normalize recorded response: %w", err)
 	}
-	promptTokens, completionTokens := normalizer.ExtractUsage(normalizedResponse)
+	promptTokens, completionTokens := ir.Normalizer.ExtractUsage(normalizedResponse)
 
 	p.recordTrace(TraceEntry{
-		Timestamp:        start,
-		ProviderFamily:   canonical.ProviderFamily,
-		Model:            canonical.Model,
-		CanonicalHash:    hash,
+		Timestamp:        ir.Start,
+		ProviderFamily:   ir.Canonical.ProviderFamily,
+		Model:            ir.Canonical.Model,
+		CanonicalHash:    ir.Hash,
 		FixtureHit:       true,
-		DurationMs:       int(time.Since(start).Milliseconds()),
+		DurationMs:       int(time.Since(ir.Start).Milliseconds()),
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 	})
