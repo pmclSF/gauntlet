@@ -15,12 +15,18 @@ import inspect
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Optional
 from datetime import datetime, timezone
 
 from gauntlet.events import emit_tool_call, emit_tool_error
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
 
 
 # Denylist fields stripped from tool args before hashing.
@@ -38,7 +44,7 @@ DENYLIST_FIELDS = {
 DENYLIST_PREFIXES = ("metadata.", "extra_headers.")
 
 _fixture_lock_loaded = False
-_fixture_lock_index = {}
+_fixture_lock_index: dict[str, str] = {}
 _lock_index_lock = threading.Lock()
 
 
@@ -90,7 +96,7 @@ def _trusted_recorder_identities() -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
-def _load_tool_lock_index() -> dict:
+def _load_tool_lock_index() -> dict[str, str]:
     global _fixture_lock_loaded, _fixture_lock_index
     if _fixture_lock_loaded:
         return _fixture_lock_index
@@ -99,7 +105,7 @@ def _load_tool_lock_index() -> dict:
         if _fixture_lock_loaded:
             return _fixture_lock_index
 
-        loaded_index = {}
+        loaded_index: dict[str, str] = {}
         lockfile_path = _replay_lockfile_path()
         if not os.path.exists(lockfile_path):
             if _required_tool_lockfile():
@@ -159,7 +165,9 @@ def _load_tool_lock_index() -> dict:
         return _fixture_lock_index
 
 
-def _validate_fixture_signature_presence(fixture_path: str, fixture_data: dict):
+def _validate_fixture_signature_presence(
+    fixture_path: str, fixture_data: dict[str, Any]
+) -> None:
     if not _required_fixture_signatures():
         return
     signature = fixture_data.get("signature")
@@ -212,13 +220,25 @@ def _strip_denylist(obj: Any) -> Any:
     return obj
 
 
-def _canonicalize_args(tool_name: str, args: dict) -> bytes:
+def _canonicalize_args(tool_name: str, args: dict[str, Any]) -> bytes:
     """Canonicalize tool call args to deterministic JSON bytes."""
     canonical = {
         "tool": tool_name,
         "args": _strip_denylist(args),
     }
     return json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _normalize_bound_args(args_dict: dict[str, Any]) -> dict[str, Any]:
+    """Drop implicit method receiver args from fixture hashing/tracing."""
+    if not args_dict:
+        return args_dict
+    first_key = next(iter(args_dict))
+    if first_key in {"self", "cls"}:
+        normalized = dict(args_dict)
+        normalized.pop(first_key, None)
+        return normalized
+    return args_dict
 
 
 def _hash_canonical(data: bytes) -> str:
@@ -294,7 +314,19 @@ def _load_fixture(fixture_hash: str) -> Optional[Any]:
     return data.get("response")
 
 
-def _intercept(tool_name, func, args, call_kwargs):
+def _intercept(
+    tool_name: str,
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    call_kwargs: dict[str, Any],
+) -> tuple[
+    str,
+    Any,
+    Optional[dict[str, Any]],
+    Optional[str],
+    Optional[bytes],
+    Optional[float],
+]:
     """Common interception logic for sync and async wrappers.
 
     Returns (mode, result, args_dict, canonical_hash, canonical_bytes, start).
@@ -311,7 +343,7 @@ def _intercept(tool_name, func, args, call_kwargs):
     sig = inspect.signature(func)
     bound = sig.bind(*args, **call_kwargs)
     bound.apply_defaults()
-    args_dict = dict(bound.arguments)
+    args_dict = _normalize_bound_args(dict(bound.arguments))
 
     start = time.time()
     canonical_bytes = _canonicalize_args(tool_name, args_dict)
@@ -348,8 +380,13 @@ def _intercept(tool_name, func, args, call_kwargs):
 
 
 def _finish_live(
-    tool_name, args_dict, canonical_hash, canonical_bytes, start, result
-):
+    tool_name: str,
+    args_dict: dict[str, Any],
+    canonical_hash: str,
+    canonical_bytes: bytes,
+    start: float,
+    result: Any,
+) -> None:
     """Post-call logic for live mode: save fixture and emit trace."""
     duration_ms = int((time.time() - start) * 1000)
     _save_fixture(
@@ -365,7 +402,7 @@ def _finish_live(
     )
 
 
-def tool(name: Optional[str] = None, **kwargs):
+def tool(name: Optional[str] = None, **kwargs: Any) -> Callable[[Any], Any]:
     """Decorator that intercepts tool execution for Gauntlet fixture replay.
 
     Supports both sync and async functions:
@@ -383,52 +420,72 @@ def tool(name: Optional[str] = None, **kwargs):
         - The real function runs transparently
     """
 
-    def decorator(func: Callable) -> Callable:
-        tool_name = name or func.__name__
+    def decorator(func: Any) -> Any:
+        is_static = isinstance(func, staticmethod)
+        is_class = isinstance(func, classmethod)
+        unwrapped = func.__func__ if (is_static or is_class) else func
+        tool_name = name or unwrapped.__name__
 
-        if inspect.iscoroutinefunction(func):
-            @functools.wraps(func)
-            async def async_wrapper(*args, **call_kwargs):
+        if inspect.iscoroutinefunction(unwrapped):
+            @functools.wraps(unwrapped)
+            async def async_wrapper(*args: Any, **call_kwargs: Any) -> Any:
                 mode, result, args_dict, canonical_hash, canonical_bytes, start = (
-                    _intercept(tool_name, func, args, call_kwargs)
+                    _intercept(tool_name, unwrapped, args, call_kwargs)
                 )
                 if mode == "passthrough":
-                    return await func(*args, **call_kwargs)
+                    return await unwrapped(*args, **call_kwargs)
                 if mode == "recorded":
                     return result
                 # live mode
-                result = await func(*args, **call_kwargs)
+                result = await unwrapped(*args, **call_kwargs)
+                if (
+                    args_dict is None
+                    or canonical_hash is None
+                    or canonical_bytes is None
+                    or start is None
+                ):
+                    raise RuntimeError("live interception context missing")
                 _finish_live(tool_name, args_dict, canonical_hash, canonical_bytes, start, result)
                 return result
 
-            async_wrapper._gauntlet_tool = True
-            async_wrapper._gauntlet_tool_name = tool_name
-            async_wrapper._original_func = func
-            return async_wrapper
+            wrapped = async_wrapper
         else:
-            @functools.wraps(func)
-            def wrapper(*args, **call_kwargs):
+            @functools.wraps(unwrapped)
+            def wrapper(*args: Any, **call_kwargs: Any) -> Any:
                 mode, result, args_dict, canonical_hash, canonical_bytes, start = (
-                    _intercept(tool_name, func, args, call_kwargs)
+                    _intercept(tool_name, unwrapped, args, call_kwargs)
                 )
                 if mode == "passthrough":
-                    return func(*args, **call_kwargs)
+                    return unwrapped(*args, **call_kwargs)
                 if mode == "recorded":
                     return result
                 # live mode
-                result = func(*args, **call_kwargs)
+                result = unwrapped(*args, **call_kwargs)
+                if (
+                    args_dict is None
+                    or canonical_hash is None
+                    or canonical_bytes is None
+                    or start is None
+                ):
+                    raise RuntimeError("live interception context missing")
                 _finish_live(tool_name, args_dict, canonical_hash, canonical_bytes, start, result)
                 return result
 
-            wrapper._gauntlet_tool = True
-            wrapper._gauntlet_tool_name = tool_name
-            wrapper._original_func = func
-            return wrapper
+            wrapped = wrapper
+
+        setattr(wrapped, "_gauntlet_tool", True)
+        setattr(wrapped, "_gauntlet_tool_name", tool_name)
+        setattr(wrapped, "_original_func", unwrapped)
+        if is_static:
+            return staticmethod(wrapped)
+        if is_class:
+            return classmethod(wrapped)
+        return wrapped
 
     return decorator
 
 
-def _redact_fields(obj: Any, patterns: list) -> Any:
+def _redact_fields(obj: Any, patterns: list[str]) -> Any:
     """Redact fields matching glob patterns like '**.api_key'."""
     if isinstance(obj, dict):
         result = {}
@@ -452,11 +509,11 @@ def _field_matches(field_name: str, pattern: str) -> bool:
 
 def _save_fixture(
     tool_name: str,
-    args_dict: dict,
+    args_dict: dict[str, Any],
     fixture_hash: str,
     canonical_bytes: bytes,
     result: Any,
-):
+) -> None:
     """Save a tool fixture to the fixture store."""
     fixture_dir = os.environ.get(
         "GAUNTLET_FIXTURE_DIR", "evals/fixtures/tools"
@@ -492,8 +549,64 @@ def _save_fixture(
     if scenario_digest:
         fixture_data["scenario_set_sha256"] = scenario_digest
 
-    with open(fixture_path, "w") as f:
-        json.dump(fixture_data, f, indent=2, default=str, sort_keys=True)
+    _atomic_write_fixture_json(fixture_path, fixture_data)
+
+
+def _atomic_write_fixture_json(
+    fixture_path: str, fixture_data: dict[str, Any]
+) -> None:
+    fixture_dir = os.path.dirname(fixture_path) or "."
+    os.makedirs(fixture_dir, exist_ok=True)
+    lock_path = fixture_path + ".lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    tmp_path = ""
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=fixture_dir,
+            prefix=".fixture-",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = tmp_file.name
+            json.dump(
+                fixture_data,
+                tmp_file,
+                indent=2,
+                default=str,
+                sort_keys=True,
+            )
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+
+        os.replace(tmp_path, fixture_path)
+        tmp_path = ""
+
+        try:
+            dir_fd = os.open(fixture_dir, os.O_RDONLY)
+        except OSError:
+            dir_fd = -1
+        if dir_fd >= 0:
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
+        if fcntl is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(lock_fd)
 
 
 def _first_non_empty(*values: str) -> str:
@@ -503,7 +616,7 @@ def _first_non_empty(*values: str) -> str:
     return ""
 
 
-def _build_provenance(source: str) -> dict:
+def _build_provenance(source: str) -> dict[str, Any]:
     identity = _first_non_empty(
         os.environ.get("GAUNTLET_RECORDER_IDENTITY", ""),
         os.environ.get("GITHUB_ACTOR", ""),

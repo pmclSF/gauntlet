@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -34,7 +35,13 @@ func mergedProcessEnv(overrides map[string]string, restrictHostEnv bool) []strin
 	}
 
 	env := make([]string, 0, len(envMap))
-	for k, v := range envMap {
+	keys := make([]string, 0, len(envMap))
+	for k := range envMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := envMap[k]
 		env = append(env, k+"="+v)
 	}
 	return env

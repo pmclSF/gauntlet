@@ -41,19 +41,29 @@ func (c *Contract) UnmarshalJSON(data []byte) error {
 
 	// Decode scalar fields.
 	if v, ok := raw["baseline_type"]; ok {
-		json.Unmarshal(v, &c.BaselineType)
+		if err := json.Unmarshal(v, &c.BaselineType); err != nil {
+			return fmt.Errorf("baseline_type: %w", err)
+		}
 	}
 	if v, ok := raw["scenario"]; ok {
-		json.Unmarshal(v, &c.Scenario)
+		if err := json.Unmarshal(v, &c.Scenario); err != nil {
+			return fmt.Errorf("scenario: %w", err)
+		}
 	}
 	if v, ok := raw["suite"]; ok {
-		json.Unmarshal(v, &c.Suite)
+		if err := json.Unmarshal(v, &c.Suite); err != nil {
+			return fmt.Errorf("suite: %w", err)
+		}
 	}
 	if v, ok := raw["recorded_at"]; ok {
-		json.Unmarshal(v, &c.RecordedAt)
+		if err := json.Unmarshal(v, &c.RecordedAt); err != nil {
+			return fmt.Errorf("recorded_at: %w", err)
+		}
 	}
 	if v, ok := raw["commit"]; ok {
-		json.Unmarshal(v, &c.Commit)
+		if err := json.Unmarshal(v, &c.Commit); err != nil {
+			return fmt.Errorf("commit: %w", err)
+		}
 	}
 
 	// tool_sequence: try nested struct first, fall back to flat array.
@@ -106,7 +116,13 @@ func (c *Contract) UnmarshalJSON(data []byte) error {
 				hasOutput = true
 			}
 		}
-
+		if v, ok := raw["expected_output"]; ok {
+			var rawOutput json.RawMessage
+			if json.Unmarshal(v, &rawOutput) == nil {
+				output.ExpectedOutput = rawOutput
+				hasOutput = true
+			}
+		}
 		if hasOutput {
 			c.Output = &output
 		}
@@ -126,6 +142,7 @@ type OutputBaseline struct {
 	Schema           map[string]interface{} `json:"schema,omitempty"`
 	ForbiddenContent []string               `json:"forbidden_content"`
 	RequiredFields   []string               `json:"required_fields"`
+	ExpectedOutput   json.RawMessage        `json:"expected_output,omitempty"`
 }
 
 // Load reads a contract baseline from disk.

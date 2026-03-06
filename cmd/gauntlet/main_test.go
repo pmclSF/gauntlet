@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -256,6 +258,234 @@ fixtures_dir: evals/fixtures
 
 	if _, err := os.Stat(filepath.Join(fixturesDir, fixture.DefaultReplayLockfileName)); err != nil {
 		t.Fatalf("expected replay lockfile: %v", err)
+	}
+}
+
+func TestValidateCmd_SuiteValid(t *testing.T) {
+	root := t.TempDir()
+	suiteDir := filepath.Join(root, "evals", "smoke")
+	toolsDir := filepath.Join(root, "evals", "world", "tools")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(suiteDir, "order.yaml"), []byte(`scenario: order_ok
+input:
+  messages:
+    - role: user
+      content: hello
+world:
+  tools:
+    order_lookup: nominal
+assertions:
+  - type: tool_sequence
+    required: [order_lookup]
+`), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "order_lookup.yaml"), []byte(`tool: order_lookup
+states:
+  nominal:
+    response:
+      status: ok
+`), 0o644); err != nil {
+		t.Fatalf("write tool def: %v", err)
+	}
+
+	cmd := newValidateCmd()
+	cmd.SetArgs([]string{
+		"--suite", suiteDir,
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("validate command failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(suiteDir, "order.yaml"))
+	if err != nil {
+		t.Fatalf("read scenario after validate: %v", err)
+	}
+	if !strings.HasPrefix(string(data), scenarioSchemaDirective) {
+		t.Fatalf("expected schema directive injected, got:\n%s", string(data))
+	}
+}
+
+func TestValidateCmd_InvalidWorldReference(t *testing.T) {
+	root := t.TempDir()
+	suiteDir := filepath.Join(root, "evals", "smoke")
+	toolsDir := filepath.Join(root, "evals", "world", "tools")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(suiteDir, "order.yaml"), []byte(`scenario: order_bad
+input:
+  messages:
+    - role: user
+      content: hello
+world:
+  tools:
+    order_lookup: missing_state
+assertions:
+  - type: tool_sequence
+    required: [order_lookup]
+`), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "order_lookup.yaml"), []byte(`tool: order_lookup
+states:
+  nominal:
+    response:
+      status: ok
+  timeout:
+    delay_ms: 100
+`), 0o644); err != nil {
+		t.Fatalf("write tool def: %v", err)
+	}
+
+	cmd := newValidateCmd()
+	cmd.SetArgs([]string{
+		"--suite", suiteDir,
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected validate command to fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "validation failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCaptureCmd_GeneratesScenarioFromTrace(t *testing.T) {
+	root := t.TempDir()
+	tracePath := filepath.Join(root, "trace.ndjson")
+	outputPath := filepath.Join(root, "captured.yaml")
+	trace := `{"type":"tool_call","tool_name":"order_lookup","args":{"order_id":"ord-1"}}
+{"type":"tool_call","tool_name":"payment_lookup","args":{"order_id":"ord-1"}}
+`
+	if err := os.WriteFile(tracePath, []byte(trace), 0o644); err != nil {
+		t.Fatalf("write trace: %v", err)
+	}
+
+	cmd := newCaptureCmd()
+	cmd.SetArgs([]string{
+		"--trace", tracePath,
+		"--output", outputPath,
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("capture command failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read captured scenario: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Generated from trace") {
+		t.Fatalf("missing generated-from-trace header:\n%s", content)
+	}
+	if !strings.Contains(content, "tool_sequence") {
+		t.Fatalf("missing tool_sequence assertion:\n%s", content)
+	}
+	if !strings.Contains(content, "order_lookup") || !strings.Contains(content, "payment_lookup") {
+		t.Fatalf("missing tool names from trace:\n%s", content)
+	}
+}
+
+func TestInitCmd_NonInteractiveDefaults(t *testing.T) {
+	root := t.TempDir()
+	agentPath := filepath.Join(root, "agent.py")
+	if err := os.WriteFile(agentPath, []byte("print('hello')\n"), 0o644); err != nil {
+		t.Fatalf("write agent.py: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() { _ = os.Chdir(wd) }()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetIn(bytes.NewBuffer(nil))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(output)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	requiredPaths := []string{
+		filepath.Join(root, ".github", "workflows", "gauntlet.yml"),
+		filepath.Join(root, "evals", "gauntlet.yml"),
+		filepath.Join(root, "evals", "smoke", "example_scenario.yaml"),
+	}
+	for _, path := range requiredPaths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated file %s: %v", path, err)
+		}
+	}
+
+	agentData, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatalf("read agent.py: %v", err)
+	}
+	agentContent := string(agentData)
+	if !strings.Contains(agentContent, "import gauntlet_sdk as gauntlet") || !strings.Contains(agentContent, "gauntlet.connect()") {
+		t.Fatalf("expected gauntlet connect hook in agent.py, got:\n%s", agentContent)
+	}
+}
+
+func TestBuildRootCmd_HasGlobalOutputFlags(t *testing.T) {
+	cmd := buildRootCmd()
+	for _, name := range []string{"verbose", "quiet", "json"} {
+		if cmd.PersistentFlags().Lookup(name) == nil {
+			t.Fatalf("missing persistent flag --%s", name)
+		}
+	}
+}
+
+func TestRunCmd_RejectsVerboseAndQuietTogether(t *testing.T) {
+	prevVerbose := flagVerbose
+	prevQuiet := flagQuiet
+	prevJSON := flagJSON
+	defer func() {
+		flagVerbose = prevVerbose
+		flagQuiet = prevQuiet
+		flagJSON = prevJSON
+	}()
+	flagVerbose = true
+	flagQuiet = true
+	flagJSON = false
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--suite", "smoke"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected run command to reject --verbose + --quiet")
+	}
+	if !strings.Contains(err.Error(), "--verbose and --quiet cannot be used together") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExitCodeForError(t *testing.T) {
+	if got := exitCodeForError(nil); got != ExitSuccess {
+		t.Fatalf("exitCodeForError(nil) = %d, want %d", got, ExitSuccess)
+	}
+	if got := exitCodeForError(errors.New("unknown flag: --bad")); got != ExitInvalidInput {
+		t.Fatalf("invalid-input error code = %d, want %d", got, ExitInvalidInput)
+	}
+	if got := exitCodeForError(errors.New("run failed for suite smoke: boom")); got != ExitError {
+		t.Fatalf("runtime error code = %d, want %d", got, ExitError)
 	}
 }
 

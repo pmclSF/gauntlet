@@ -223,6 +223,25 @@ assertions:
 	}
 }
 
+func TestLoad_RunnerFailFastParsed(t *testing.T) {
+	root := t.TempDir()
+	policyPath := filepath.Join(root, "evals", "gauntlet.yml")
+	mustMkdir(t, filepath.Dir(policyPath))
+	mustWriteFile(t, policyPath, `
+version: 1
+runner:
+  fail_fast: true
+`)
+
+	resolved, err := Load(policyPath, "smoke")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !resolved.FailFast {
+		t.Fatal("FailFast = false, want true")
+	}
+}
+
 func TestLoad_AssertionModeRejectsUnknownKey(t *testing.T) {
 	root := t.TempDir()
 	policyPath := filepath.Join(root, "evals", "gauntlet.yml")

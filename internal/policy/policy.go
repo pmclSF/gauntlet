@@ -17,6 +17,7 @@ import (
 // Resolved is the normalized runtime configuration derived from a policy file.
 type Resolved struct {
 	BudgetMs                int64
+	FailFast                bool
 	RunnerMode              string
 	ModelMode               string
 	SuiteDir                string
@@ -61,6 +62,7 @@ type filePolicy struct {
 	Suite        string                 `yaml:"suite"`
 	Suites       map[string]suitePolicy `yaml:"suites"`
 	Defaults     defaultsPolicy         `yaml:"defaults"`
+	Runner       runnerPolicy           `yaml:"runner"`
 	ScenariosDir string                 `yaml:"scenarios_dir"`
 	WorldDir     string                 `yaml:"world_dir"`
 	FixturesDir  string                 `yaml:"fixtures_dir"`
@@ -84,6 +86,10 @@ type defaultsPolicy struct {
 	Mode       string `yaml:"mode"`
 	RunnerMode string `yaml:"runner_mode"`
 	ModelMode  string `yaml:"model_mode"`
+}
+
+type runnerPolicy struct {
+	FailFast bool `yaml:"fail_fast"`
 }
 
 type tutPolicy struct {
@@ -201,6 +207,7 @@ func LoadWithOptions(path string, suite string, opts LoadOptions) (*Resolved, er
 
 	res := &Resolved{
 		BudgetMs:                budgetMs,
+		FailFast:                raw.Runner.FailFast,
 		RunnerMode:              runnerMode,
 		ModelMode:               modelMode,
 		SuiteDir:                suiteDir,

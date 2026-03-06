@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gauntlet.dev/schema/scenario.schema.json",
+  "$id": "https://gauntlet.dev/schema/scenario.json",
   "title": "Gauntlet Scenario",
   "description": "Schema for Gauntlet scenario YAML files.",
   "type": "object",
@@ -139,6 +139,7 @@
               "type": { "const": "tool_args_invariant" },
               "tool": { "type": "string", "minLength": 1 },
               "invariant": { "type": "string", "minLength": 1 },
+              "require_called": { "type": "boolean", "default": true },
               "description": { "type": "string" }
             }
           },

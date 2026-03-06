@@ -58,14 +58,15 @@ func parseTraceFile(path string) ([]TraceEvent, error) {
 		}
 		sec := int64(raw.Timestamp)
 		nsec := int64((raw.Timestamp - float64(sec)) * 1e9)
-		event := TraceEvent{
-			EventType:  raw.Type,
-			ToolName:   raw.ToolName,
-			Args:       raw.Args,
-			Response:   raw.Result,
-			Timestamp:  time.Unix(sec, nsec),
-			DurationMs: raw.DurationMs,
-		}
+			event := TraceEvent{
+				EventType:  raw.Type,
+				ToolName:   raw.ToolName,
+				Args:       raw.Args,
+				Response:   raw.Result,
+				Error:      raw.Error,
+				Timestamp:  time.Unix(sec, nsec),
+				DurationMs: raw.DurationMs,
+			}
 		if raw.Type == "model_call" && (raw.ProviderFamily != "" || raw.Model != "" || raw.CanonicalHash != "") {
 			promptTokens, completionTokens := extractModelCallTokens(raw)
 			event.ModelCall = &ModelCallEvent{

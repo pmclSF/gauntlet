@@ -3,6 +3,7 @@ package scenario
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -445,6 +446,44 @@ assertions: []
 	}
 	if !names["alpha"] || !names["beta"] {
 		t.Errorf("unexpected scenario names: %v", names)
+	}
+}
+
+func TestLoadSuite_DuplicateScenarioNamesFail(t *testing.T) {
+	dir := t.TempDir()
+	first := writeTemp(t, dir, "a.yaml", `
+scenario: duplicate_case
+input:
+  messages:
+    - role: user
+      content: hello
+assertions: []
+`)
+	second := writeTemp(t, dir, "b.yaml", `
+scenario: duplicate_case
+input:
+  messages:
+    - role: user
+      content: world
+assertions: []
+`)
+
+	_, err := LoadSuite(dir)
+	if err == nil {
+		t.Fatal("expected duplicate scenario name error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `duplicate scenario name "duplicate_case"`) {
+		t.Fatalf("error missing duplicate name details: %s", msg)
+	}
+	if !strings.Contains(msg, first+":1") {
+		t.Fatalf("error missing first file path: %s", msg)
+	}
+	if !strings.Contains(msg, second+":1") {
+		t.Fatalf("error missing second file path: %s", msg)
+	}
+	if !strings.Contains(msg, "scenario names must be unique across the suite") {
+		t.Fatalf("error missing remediation guidance: %s", msg)
 	}
 }
 

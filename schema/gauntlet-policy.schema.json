@@ -179,6 +179,16 @@
         }
       }
     },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fail_fast": {
+          "type": "boolean",
+          "description": "When true, stop the suite after the first failed or error scenario."
+        }
+      }
+    },
     "suites": {
       "type": "object",
       "additionalProperties": {

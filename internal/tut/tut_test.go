@@ -197,7 +197,9 @@ func TestAgentOutputOmitEmptyStderr(t *testing.T) {
 	}
 
 	var m map[string]interface{}
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 
 	if _, ok := m["stderr"]; ok {
 		t.Error("stderr should be omitted when empty (omitempty tag)")
@@ -290,7 +292,9 @@ func TestTraceEventOmitEmpty(t *testing.T) {
 	}
 
 	var m map[string]interface{}
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 
 	if _, ok := m["tool_name"]; ok {
 		t.Error("tool_name should be omitted when empty (omitempty tag)")

@@ -340,7 +340,9 @@ func (p *Proxy) handleDecryptedConnection(conn net.Conn, hostname string) {
 			ContentLength: int64(len(respBody)),
 		}
 		resp.Header.Set("Content-Type", "application/json")
-		resp.Write(conn)
+		if err := resp.Write(conn); err != nil {
+			return
+		}
 
 		// If the client signaled Connection: close, stop.
 		if req.Close {
@@ -385,7 +387,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	w.Write(respBody)
+	if _, err := w.Write(respBody); err != nil {
+		return
+	}
 }
 
 func (p *Proxy) interceptRequest(hostname, path string, headers map[string]string, body []byte) ([]byte, int, error) {
@@ -614,8 +618,10 @@ func (p *Proxy) tunnelDirect(clientConn net.Conn, hostname string) {
 	}
 	defer serverConn.Close()
 
-	go io.Copy(serverConn, clientConn)
-	io.Copy(clientConn, serverConn)
+	go func() {
+		_, _ = io.Copy(serverConn, clientConn)
+	}()
+	_, _ = io.Copy(clientConn, serverConn)
 }
 
 // stripStreamFlag normalizes provider streaming requests for fixture recording.

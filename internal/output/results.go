@@ -101,5 +101,5 @@ func WriteResults(dir string, result *RunResult) error {
 	}
 
 	path := filepath.Join(dir, "results.json")
-	return os.WriteFile(path, redacted, 0o644)
+	return atomicWrite(path, redacted, 0o644)
 }

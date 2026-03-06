@@ -17,6 +17,10 @@ func (a *ToolArgsAssertion) IsSoft() bool { return false }
 func (a *ToolArgsAssertion) Evaluate(ctx Context) Result {
 	toolName, hasTool := specString(ctx.Spec, "tool")
 	invariant, hasInvariant := specString(ctx.Spec, "invariant")
+	requireCalled := true
+	if configured, ok := specBool(ctx.Spec, "require_called"); ok {
+		requireCalled = configured
+	}
 
 	if hasInvariant && invariant != "" {
 		matched := false
@@ -41,6 +45,20 @@ func (a *ToolArgsAssertion) Evaluate(ctx Context) Result {
 			}
 		}
 		if !matched {
+			if requireCalled {
+				target := toolName
+				if target == "" {
+					target = "<any>"
+				}
+				return Result{
+					AssertionType: a.Type(),
+					Passed:        false,
+					Expected:      fmt.Sprintf("tool %q to be called so invariant can be evaluated", target),
+					Actual:        fmt.Sprintf("tool %q was never called", target),
+					Message:       fmt.Sprintf("tool_args_invariant: tool '%s' was never called - invariant could not be evaluated (set require_called: false to allow this)", target),
+					DocketHint:    "tool.args_invalid",
+				}
+			}
 			return Result{
 				AssertionType: a.Type(),
 				Passed:        true,

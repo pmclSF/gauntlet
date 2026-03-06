@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	runnerModeValues = []string{"local", "pr_ci", "fork_pr", "nightly"}
+	runnerModeValues = []string{"local", "pr_ci", "fork_pr", "nightly", "hermetic", "replay"}
 	modelModeValues  = []string{"recorded", "live", "passthrough"}
 )
 
@@ -26,7 +26,7 @@ func normalizeMode(raw string) string {
 
 func isRunnerModeValue(mode string) bool {
 	switch normalizeMode(mode) {
-	case "local", "pr_ci", "fork_pr", "nightly":
+	case "local", "pr_ci", "fork_pr", "nightly", "hermetic", "replay":
 		return true
 	default:
 		return false
@@ -46,6 +46,12 @@ func validateRunnerMode(raw, source string) (string, error) {
 	mode := normalizeMode(raw)
 	if mode == "" {
 		return "", nil
+	}
+	switch mode {
+	case "hermetic":
+		return "pr_ci", nil
+	case "replay":
+		return "fork_pr", nil
 	}
 	if isRunnerModeValue(mode) {
 		return mode, nil
