@@ -99,12 +99,12 @@ func TestHandleRecorded_ReplayStatusCodes(t *testing.T) {
 				Start:          time.Now(),
 			}
 
-			_, status, err := p.handleRecorded(ir)
+			resp, err := p.handleRecorded(ir)
 			if err != nil {
 				t.Fatalf("handleRecorded failed: %v", err)
 			}
-			if status != tt.wantStatus {
-				t.Errorf("status = %d, want %d", status, tt.wantStatus)
+			if resp.Status != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.Status, tt.wantStatus)
 			}
 		})
 	}
@@ -124,12 +124,12 @@ func TestHandleRecorded_BackwardCompat_NoResponseCode(t *testing.T) {
 		Start:          time.Now(),
 	}
 
-	_, status, err := p.handleRecorded(ir)
+	resp, err := p.handleRecorded(ir)
 	if err != nil {
 		t.Fatalf("handleRecorded failed: %v", err)
 	}
-	if status != 200 {
-		t.Errorf("status = %d, want 200 (backward compat default)", status)
+	if resp.Status != 200 {
+		t.Errorf("status = %d, want 200 (backward compat default)", resp.Status)
 	}
 }
 
@@ -150,12 +150,108 @@ func TestHandleRecorded_FixtureMiss(t *testing.T) {
 		Start:          time.Now(),
 	}
 
-	_, _, err := p.handleRecorded(ir)
+	_, err := p.handleRecorded(ir)
 	if err == nil {
 		t.Fatal("expected fixture miss error, got nil")
 	}
 	if _, ok := err.(*fixture.ErrFixtureMiss); !ok {
 		t.Errorf("expected *fixture.ErrFixtureMiss, got %T: %v", err, err)
+	}
+}
+
+func setupReplayFixtureWithHeaders(t *testing.T, responseCode int, response json.RawMessage, headers map[string]string) (*fixture.Store, []byte, string) {
+	t.Helper()
+	cr := replayTestCanonicalRequest()
+	canonicalBytes, err := fixture.CanonicalizeRequest(cr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := fixture.HashCanonical(canonicalBytes)
+
+	dir := t.TempDir()
+	store := fixture.NewStore(dir)
+	f := &fixture.ModelFixture{
+		FixtureID:        hash,
+		HashVersion:      1,
+		CanonicalHash:    hash,
+		ProviderFamily:   "test",
+		Model:            "test-model",
+		CanonicalRequest: json.RawMessage(canonicalBytes),
+		Response:         response,
+		ResponseCode:     responseCode,
+		ResponseHeaders:  headers,
+		RecordedAt:       time.Now(),
+		RecordedBy:       "test",
+	}
+	modelsDir := filepath.Join(dir, "models")
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, hash+".json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return store, canonicalBytes, hash
+}
+
+func TestHandleRecorded_PreservesResponseHeaders(t *testing.T) {
+	headers := map[string]string{
+		"Content-Type": "text/plain",
+		"Retry-After":  "60",
+	}
+	store, canonicalBytes, hash := setupReplayFixtureWithHeaders(t, 429, json.RawMessage(`{"error":"too many requests"}`), headers)
+
+	p := &Proxy{Mode: ModeRecorded, Store: store}
+	ir := &interceptedRequest{
+		Normalizer:     &stubNormalizer{},
+		Canonical:      replayTestCanonicalRequest(),
+		CanonicalBytes: canonicalBytes,
+		Hash:           hash,
+		Start:          time.Now(),
+	}
+
+	resp, err := p.handleRecorded(ir)
+	if err != nil {
+		t.Fatalf("handleRecorded failed: %v", err)
+	}
+	if resp.Status != 429 {
+		t.Errorf("status = %d, want 429", resp.Status)
+	}
+	if resp.Headers["Content-Type"] != "text/plain" {
+		t.Errorf("Content-Type = %q, want text/plain", resp.Headers["Content-Type"])
+	}
+	if resp.Headers["Retry-After"] != "60" {
+		t.Errorf("Retry-After = %q, want 60", resp.Headers["Retry-After"])
+	}
+}
+
+func TestHandleRecorded_BackwardCompat_NoResponseHeaders(t *testing.T) {
+	// Fixtures recorded before ResponseHeaders was added have nil headers.
+	// Response should still work with nil headers.
+	store, canonicalBytes, hash := setupReplayFixture(t, 200, json.RawMessage(`{"ok":true}`))
+
+	p := &Proxy{Mode: ModeRecorded, Store: store}
+	ir := &interceptedRequest{
+		Normalizer:     &stubNormalizer{},
+		Canonical:      replayTestCanonicalRequest(),
+		CanonicalBytes: canonicalBytes,
+		Hash:           hash,
+		Start:          time.Now(),
+	}
+
+	resp, err := p.handleRecorded(ir)
+	if err != nil {
+		t.Fatalf("handleRecorded failed: %v", err)
+	}
+	if resp.Status != 200 {
+		t.Errorf("status = %d, want 200", resp.Status)
+	}
+	// Headers should be nil for old fixtures — writeResponseHeaders will default to JSON
+	if resp.Headers != nil {
+		t.Errorf("expected nil headers for old fixture, got %v", resp.Headers)
 	}
 }
 

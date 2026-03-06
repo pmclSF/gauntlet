@@ -14,15 +14,16 @@ import (
 // handleRecorded looks up a fixture by canonical hash and returns the recorded
 // response. Returns the fixture's original HTTP status code, defaulting to 200
 // for backward compatibility with fixtures that predate status code recording.
-func (p *Proxy) handleRecorded(ir *interceptedRequest) ([]byte, int, error) {
+// Recorded response headers are preserved when present in the fixture.
+func (p *Proxy) handleRecorded(ir *interceptedRequest) (*interceptedResponse, error) {
 	f, err := p.Store.GetModelFixture(ir.Hash)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if f == nil {
 		candidates, _ := p.Store.NearestModelFixtureCandidates(ir.Canonical.ProviderFamily, ir.Canonical.Model, ir.Hash, 3)
 		modelVersionHint := p.modelVersionHint(ir.CanonicalBytes, ir.Canonical.Model, candidates)
-		return nil, 0, &fixture.ErrFixtureMiss{
+		return nil, &fixture.ErrFixtureMiss{
 			FixtureType:      "model:" + ir.Canonical.Model,
 			ProviderFamily:   ir.Canonical.ProviderFamily,
 			Model:            ir.Canonical.Model,
@@ -35,7 +36,7 @@ func (p *Proxy) handleRecorded(ir *interceptedRequest) ([]byte, int, error) {
 	}
 	normalizedResponse, err := ir.Normalizer.NormalizeResponseForFixture(f.Response)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to normalize recorded response: %w", err)
+		return nil, fmt.Errorf("failed to normalize recorded response: %w", err)
 	}
 	promptTokens, completionTokens := ir.Normalizer.ExtractUsage(normalizedResponse)
 
@@ -57,7 +58,11 @@ func (p *Proxy) handleRecorded(ir *interceptedRequest) ([]byte, int, error) {
 		statusCode = http.StatusOK
 	}
 
-	return normalizedResponse, statusCode, nil
+	return &interceptedResponse{
+		Body:    normalizedResponse,
+		Status:  statusCode,
+		Headers: f.ResponseHeaders,
+	}, nil
 }
 
 func (p *Proxy) modelVersionHint(requestedCanonical []byte, requestedModel string, candidates []fixture.FixtureMissCandidate) string {

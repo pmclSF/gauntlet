@@ -186,6 +186,50 @@ func TestEnvVarsWithCA(t *testing.T) {
 	}
 }
 
+func TestEnvVarsPreservePolicy(t *testing.T) {
+	p := &Proxy{
+		Addr:      "127.0.0.1:8080",
+		EnvPolicy: ProxyEnvPreserve,
+		CA:        nil,
+	}
+
+	vars := p.EnvVars("/tmp/ca.pem")
+
+	// Should have 7 vars (6 proxy + 1 GAUNTLET_PROXY_PORT) but NO no_proxy entries
+	for _, v := range vars {
+		if v == "NO_PROXY=" || v == "no_proxy=" {
+			t.Errorf("preserve policy should not clear NO_PROXY, got %q", v)
+		}
+	}
+	// Verify proxy vars are still present
+	found := false
+	for _, v := range vars {
+		if v == "HTTPS_PROXY=http://127.0.0.1:8080" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected HTTPS_PROXY to be set even with preserve policy")
+	}
+}
+
+func TestEnvVarsDefaultClearsNoProxy(t *testing.T) {
+	// Default (zero value) EnvPolicy should clear NO_PROXY
+	p := &Proxy{Addr: "127.0.0.1:8080"}
+
+	vars := p.EnvVars("/tmp/ca.pem")
+
+	foundNoProxy := false
+	for _, v := range vars {
+		if v == "NO_PROXY=" {
+			foundNoProxy = true
+		}
+	}
+	if !foundNoProxy {
+		t.Error("default policy should clear NO_PROXY")
+	}
+}
+
 func TestHeaderMap(t *testing.T) {
 	h := http.Header{}
 	h.Set("Content-Type", "application/json")
@@ -839,6 +883,71 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestUnknownTrafficPolicy_Reject(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	p.UnknownTraffic = UnknownTrafficReject
+
+	// Request to an unknown host should be rejected
+	req := httptest.NewRequest("GET", "http://example.com/health", nil)
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"code":"unknown_traffic_rejected"`) {
+		t.Fatalf("expected unknown_traffic_rejected code, got: %s", body)
+	}
+	if !strings.Contains(body, "example.com/health") {
+		t.Fatalf("expected hostname/path in error, got: %s", body)
+	}
+}
+
+func TestUnknownTrafficPolicy_Passthrough(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	p.UnknownTraffic = UnknownTrafficPassthrough
+
+	// Request to an unknown host should proceed (and fail with fixture miss,
+	// not with unknown_traffic_rejected)
+	req := httptest.NewRequest("POST", "http://example.com/v1/anything", strings.NewReader(`{"foo":"bar"}`))
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	body := w.Body.String()
+	// Should NOT be forbidden — it should proceed through the pipeline
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("passthrough policy should not reject unknown traffic, got 403: %s", body)
+	}
+	// In recorded mode with no fixture, we expect a fixture miss
+	if !strings.Contains(body, `"code":"fixture_miss"`) {
+		t.Fatalf("expected fixture_miss (not rejection), got: %s", body)
+	}
+}
+
+func TestUnknownTrafficPolicy_DefaultIsPassthrough(t *testing.T) {
+	p := NewProxy("127.0.0.1:0", ModeRecorded, fixture.NewStore(t.TempDir()), nil)
+	// UnknownTraffic is zero value (empty string) — should behave as passthrough
+
+	req := httptest.NewRequest("POST", "http://example.com/v1/anything", strings.NewReader(`{"foo":"bar"}`))
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	p.handleHTTP(w, req)
+
+	resp := w.Result()
+	// Default should NOT reject — should proceed to fixture miss
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatal("default policy should not reject unknown traffic")
+	}
 }
 
 func seedOpenAIRecordedFixture(t *testing.T, store *fixture.Store, body string) {

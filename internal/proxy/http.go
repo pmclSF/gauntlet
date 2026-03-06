@@ -35,15 +35,47 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		hostname = strings.Split(hostname, ":")[0]
 	}
 
-	respBody, statusCode, err := p.interceptRequest(r.Method, hostname, r.URL.Path, r.URL.RawQuery, headerMap(r.Header), body)
+	resp, err := p.interceptRequest(r.Context(), r.Method, hostname, r.URL.Path, r.URL.RawQuery, headerMap(r.Header), body)
 	if err != nil {
 		p.writeHTTPError(w, err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if _, err := w.Write(respBody); err != nil {
+	writeResponseHeaders(w, resp.Headers)
+	w.WriteHeader(resp.Status)
+	if _, err := w.Write(resp.Body); err != nil {
 		return
+	}
+}
+
+// writeResponseHeaders sets allowlisted response headers on an http.ResponseWriter.
+// If no Content-Type is present in the headers, defaults to application/json
+// for backward compatibility.
+func writeResponseHeaders(w http.ResponseWriter, headers map[string]string) {
+	hasContentType := false
+	for k, v := range headers {
+		if strings.EqualFold(k, "Content-Type") {
+			hasContentType = true
+		}
+		w.Header().Set(k, v)
+	}
+	if !hasContentType {
+		w.Header().Set("Content-Type", "application/json")
+	}
+}
+
+// setConnResponseHeaders sets allowlisted response headers on an http.Header
+// (used for CONNECT tunnel responses written to net.Conn). If no Content-Type
+// is present, defaults to application/json for backward compatibility.
+func setConnResponseHeaders(h http.Header, headers map[string]string) {
+	hasContentType := false
+	for k, v := range headers {
+		if strings.EqualFold(k, "Content-Type") {
+			hasContentType = true
+		}
+		h.Set(k, v)
+	}
+	if !hasContentType {
+		h.Set("Content-Type", "application/json")
 	}
 }

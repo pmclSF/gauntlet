@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,21 +13,23 @@ import (
 
 // handleLive forwards a request to the real upstream endpoint, records the
 // response as a fixture, and returns the response to the caller.
-func (p *Proxy) handleLive(ir *interceptedRequest) ([]byte, int, error) {
+// Allowlisted response headers from the upstream are captured in the fixture
+// and returned to the caller.
+func (p *Proxy) handleLive(ir *interceptedRequest) (*interceptedResponse, error) {
 	// Normalize streaming requests so recording captures single-response fixtures.
 	path, body := stripStreamFlag(ir.Path, ir.Canonical.ProviderFamily, ir.Body)
 
-	respBody, statusCode, err := defaultTransport.Forward(context.Background(), ir.Method, ir.Hostname, path, ir.RawQuery, ir.Headers, body)
+	upstream, err := defaultTransport.Forward(ir.Ctx, ir.Method, ir.Hostname, path, ir.RawQuery, ir.Headers, body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("live request failed: %w", err)
+		return nil, fmt.Errorf("live request failed: %w", err)
 	}
-	promptTokens, completionTokens := ir.Normalizer.ExtractUsage(respBody)
-	normalizedResponse, err := ir.Normalizer.NormalizeResponseForFixture(respBody)
+	promptTokens, completionTokens := ir.Normalizer.ExtractUsage(upstream.Body)
+	normalizedResponse, err := ir.Normalizer.NormalizeResponseForFixture(upstream.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to normalize live response: %w", err)
+		return nil, fmt.Errorf("failed to normalize live response: %w", err)
 	}
 	if err := fixture.ValidateModelResponse(ir.Canonical.ProviderFamily, normalizedResponse); err != nil {
-		return nil, 0, fmt.Errorf("model response schema validation failed: %w", err)
+		return nil, fmt.Errorf("model response schema validation failed: %w", err)
 	}
 
 	// Redact before recording
@@ -43,7 +44,8 @@ func (p *Proxy) handleLive(ir *interceptedRequest) ([]byte, int, error) {
 		Model:             ir.Canonical.Model,
 		CanonicalRequest:  ir.CanonicalBytes,
 		Response:          redactedResp,
-		ResponseCode:      statusCode,
+		ResponseCode:      upstream.StatusCode,
+		ResponseHeaders:   upstream.Headers,
 		RecordedAt:        time.Now(),
 		RecordedBy:        "live",
 		Provenance:        fixture.BuildProvenance(ir.Headers, "proxy_live"),
@@ -65,7 +67,11 @@ func (p *Proxy) handleLive(ir *interceptedRequest) ([]byte, int, error) {
 		CompletionTokens: completionTokens,
 	})
 
-	return normalizedResponse, statusCode, nil
+	return &interceptedResponse{
+		Body:    normalizedResponse,
+		Status:  upstream.StatusCode,
+		Headers: upstream.Headers,
+	}, nil
 }
 
 // stripStreamFlag normalizes provider streaming requests for fixture recording.

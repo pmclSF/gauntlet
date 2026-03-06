@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,9 +14,19 @@ import (
 	"github.com/pmclSF/gauntlet/internal/proxy/providers"
 )
 
+// interceptedResponse holds the result of processing a request through the
+// proxy pipeline. It carries the response body, status code, and any
+// allowlisted response headers to preserve upstream metadata.
+type interceptedResponse struct {
+	Body    []byte
+	Status  int
+	Headers map[string]string // allowlisted response headers (may be nil)
+}
+
 // interceptedRequest holds the parsed and canonicalized form of a request
 // after provider detection and normalization. It is passed to mode handlers.
 type interceptedRequest struct {
+	Ctx            context.Context
 	Method         string
 	Hostname       string
 	Path           string
@@ -32,11 +43,20 @@ type interceptedRequest struct {
 // interceptRequest is the core interception pipeline. It detects the provider,
 // normalizes the request to canonical form, hashes it, and dispatches to the
 // appropriate mode handler (recorded, live, or passthrough).
-func (p *Proxy) interceptRequest(method, hostname, path, rawQuery string, headers map[string]string, body []byte) ([]byte, int, error) {
+func (p *Proxy) interceptRequest(ctx context.Context, method, hostname, path, rawQuery string, headers map[string]string, body []byte) (*interceptedResponse, error) {
 	start := time.Now()
 
 	// Detect provider
 	normalizer := providers.Detect(hostname, path, body, p.Normalizers)
+
+	// Enforce unknown traffic policy
+	if normalizer.Family() == "unknown" && p.UnknownTraffic == UnknownTrafficReject {
+		return nil, &proxyRequestError{
+			StatusCode: http.StatusForbidden,
+			Code:       "unknown_traffic_rejected",
+			Message:    fmt.Sprintf("unknown traffic to %s%s rejected by proxy policy", hostname, path),
+		}
+	}
 
 	// Strip denylist headers
 	cleanHeaders := fixture.StripDenylistHeaders(headers)
@@ -45,24 +65,25 @@ func (p *Proxy) interceptRequest(method, hostname, path, rawQuery string, header
 	canonical, err := normalizer.Normalize(hostname, path, cleanHeaders, body)
 	if err != nil {
 		if isMalformedJSONErr(err) {
-			return nil, 0, &proxyRequestError{
+			return nil, &proxyRequestError{
 				StatusCode: http.StatusBadRequest,
 				Code:       "malformed_json_request",
 				Message:    fmt.Sprintf("malformed JSON request body for provider %s", normalizer.Family()),
 				Cause:      err,
 			}
 		}
-		return nil, 0, fmt.Errorf("normalization failed for %s: %w", normalizer.Family(), err)
+		return nil, fmt.Errorf("normalization failed for %s: %w", normalizer.Family(), err)
 	}
 
 	// Hash canonical form
 	canonicalBytes, err := fixture.CanonicalizeRequest(canonical)
 	if err != nil {
-		return nil, 0, fmt.Errorf("canonicalization failed: %w", err)
+		return nil, fmt.Errorf("canonicalization failed: %w", err)
 	}
 	hash := fixture.HashCanonical(canonicalBytes)
 
 	ir := &interceptedRequest{
+		Ctx:            ctx,
 		Method:         method,
 		Hostname:       hostname,
 		Path:           path,
@@ -82,7 +103,7 @@ func (p *Proxy) interceptRequest(method, hostname, path, rawQuery string, header
 	case ModeLive:
 		return p.handleLive(ir)
 	default:
-		return p.handlePassthrough(ir.Method, ir.Hostname, ir.Path, ir.RawQuery, ir.Headers, ir.Body)
+		return p.handlePassthrough(ir.Ctx, ir.Method, ir.Hostname, ir.Path, ir.RawQuery, ir.Headers, ir.Body)
 	}
 }
 

@@ -28,6 +28,7 @@ type ModelFixture struct {
 	RawRequest        json.RawMessage   `json:"raw_request"`
 	Response          json.RawMessage   `json:"response"`
 	ResponseCode      int               `json:"response_code,omitempty"`
+	ResponseHeaders   map[string]string `json:"response_headers,omitempty"`
 	RecordedAt        time.Time         `json:"recorded_at"`
 	RecordedBy        string            `json:"recorded_by"`
 	IsBeta            bool              `json:"is_beta"`
