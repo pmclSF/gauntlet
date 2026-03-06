@@ -825,7 +825,7 @@ func getRequiredFields(bl *baseline.Contract) []string {
 func (r *Runner) buildTUTConfig(requiresBlockedEgress bool) tut.Config {
 	cfg := r.Config.TUTConfig
 	cfg.Env = cloneStringMap(cfg.Env)
-	if r.Config.Mode == "fork_pr" {
+	if r.Config.Mode == "fork_pr" || r.Config.Mode == "pr_ci" {
 		cfg.RestrictHostEnv = true
 		cfg.Env = stripSensitiveEnv(cfg.Env)
 	}
