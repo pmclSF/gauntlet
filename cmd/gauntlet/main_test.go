@@ -362,6 +362,50 @@ states:
 	}
 }
 
+func TestResolveSuitePathForRun_WithSuiteDirectoryPath(t *testing.T) {
+	root := t.TempDir()
+	suiteDir := filepath.Join(root, "examples", "support-agent", "evals", "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+
+	resolved := resolveSuitePathForRun(suiteDir, filepath.Join("evals", "gauntlet.yml"), false)
+	if !resolved.FromPath {
+		t.Fatal("expected suite path resolution to detect directory input")
+	}
+	if resolved.SuiteName != "smoke" {
+		t.Fatalf("SuiteName = %q, want %q", resolved.SuiteName, "smoke")
+	}
+	if filepath.Clean(resolved.SuiteDir) != filepath.Clean(suiteDir) {
+		t.Fatalf("SuiteDir = %q, want %q", resolved.SuiteDir, suiteDir)
+	}
+	wantEvalsDir := filepath.Dir(suiteDir)
+	if filepath.Clean(resolved.EvalsDir) != filepath.Clean(wantEvalsDir) {
+		t.Fatalf("EvalsDir = %q, want %q", resolved.EvalsDir, wantEvalsDir)
+	}
+	wantConfig := filepath.Join(wantEvalsDir, "gauntlet.yml")
+	if filepath.Clean(resolved.ConfigPath) != filepath.Clean(wantConfig) {
+		t.Fatalf("ConfigPath = %q, want %q", resolved.ConfigPath, wantConfig)
+	}
+}
+
+func TestResolveSuitePathForRun_ExplicitConfigKeepsConfigPath(t *testing.T) {
+	root := t.TempDir()
+	suiteDir := filepath.Join(root, "evals", "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite: %v", err)
+	}
+
+	explicitConfig := filepath.Join(root, "custom", "gauntlet.yml")
+	resolved := resolveSuitePathForRun(suiteDir, explicitConfig, true)
+	if !resolved.FromPath {
+		t.Fatal("expected suite path resolution to detect directory input")
+	}
+	if filepath.Clean(resolved.ConfigPath) != filepath.Clean(explicitConfig) {
+		t.Fatalf("ConfigPath = %q, want %q", resolved.ConfigPath, explicitConfig)
+	}
+}
+
 func TestCaptureCmd_GeneratesScenarioFromTrace(t *testing.T) {
 	root := t.TempDir()
 	tracePath := filepath.Join(root, "trace.ndjson")

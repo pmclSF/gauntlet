@@ -121,12 +121,17 @@ func newRunCmd() *cobra.Command {
 			if flagVerbose && flagQuiet {
 				return fmt.Errorf("--verbose and --quiet cannot be used together")
 			}
+
+			runSuite := resolveSuitePathForRun(suite, configPath, cmd.Flags().Changed("config"))
+			suite = runSuite.SuiteName
+			configPath = runSuite.ConfigPath
+
 			resolved, err := loadPolicyIfPresent(configPath, suite, cmd.Flags().Changed("config"))
 			if err != nil {
 				return err
 			}
 
-			if resolved == nil && !cmd.Flags().Changed("config") {
+			if !runSuite.FromPath && resolved == nil && !cmd.Flags().Changed("config") {
 				if _, statErr := os.Stat("evals"); os.IsNotExist(statErr) {
 					fmt.Println("No gauntlet.yaml or evals/ directory found.")
 					fmt.Println()
@@ -159,6 +164,11 @@ func newRunCmd() *cobra.Command {
 				ScenarioFilter:   scenarioFilter,
 			}
 			applyResolvedPolicy(&cfg, resolved, configPath)
+			if runSuite.FromPath {
+				cfg.Suite = runSuite.SuiteName
+				cfg.SuiteDir = runSuite.SuiteDir
+				cfg.EvalsDir = runSuite.EvalsDir
+			}
 			if cmd.Flags().Changed("fail-fast") {
 				cfg.FailFast = failFast
 			}
@@ -273,7 +283,7 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&suite, "suite", "smoke", "Suite to run")
+	cmd.Flags().StringVar(&suite, "suite", "smoke", "Suite name or suite directory path")
 	cmd.Flags().StringVar(&configPath, "config", "evals/gauntlet.yml", "Path to policy file")
 	cmd.Flags().StringVar(&scenarioFilter, "scenario", "", "Run a single scenario by name")
 	cmd.Flags().StringVar(&runnerMode, "runner-mode", "", "Runner execution mode (local, pr_ci, fork_pr, nightly)")
@@ -361,6 +371,41 @@ func resolveSuitePathForValidate(suite, evalsDir string) string {
 		return suite
 	}
 	return filepath.Join(evalsDir, suite)
+}
+
+type runSuitePathResolution struct {
+	SuiteName  string
+	SuiteDir   string
+	EvalsDir   string
+	ConfigPath string
+	FromPath   bool
+}
+
+func resolveSuitePathForRun(suite, configPath string, explicitConfig bool) runSuitePathResolution {
+	name := strings.TrimSpace(suite)
+	if name == "" {
+		name = "smoke"
+	}
+	result := runSuitePathResolution{
+		SuiteName:  name,
+		ConfigPath: strings.TrimSpace(configPath),
+	}
+	if result.ConfigPath == "" {
+		result.ConfigPath = filepath.Join("evals", "gauntlet.yml")
+	}
+
+	if stat, err := os.Stat(name); err == nil && stat.IsDir() {
+		suiteDir := filepath.Clean(name)
+		evalsDir := filepath.Clean(filepath.Dir(suiteDir))
+		result.SuiteName = filepath.Base(suiteDir)
+		result.SuiteDir = suiteDir
+		result.EvalsDir = evalsDir
+		result.FromPath = true
+		if !explicitConfig {
+			result.ConfigPath = filepath.Join(evalsDir, "gauntlet.yml")
+		}
+	}
+	return result
 }
 
 func ensureScenarioSchemaDirective(path string) error {
