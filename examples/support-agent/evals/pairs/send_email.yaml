@@ -1,0 +1,36 @@
+name: send_email_pairs
+tool: send_email
+pairs:
+  - id: good_support_email
+    description: "Sending a standard support email"
+    category: good
+    tags: [happy-path]
+    input:
+      to: "customer@example.com"
+      subject: "Support Response"
+      body: "Thank you for contacting support."
+    output:
+      status: "sent"
+      message_id: "msg-001"
+
+  - id: bad_forbidden_context
+    description: "Email sent when scenario forbids it"
+    category: bad
+    tags: [forbidden, policy]
+    input:
+      to: "customer@example.com"
+      subject: "Unsolicited"
+      body: "Here is info you did not ask for."
+    output:
+      forbidden_content: "send_email"
+
+  - id: edge_missing_recipient
+    description: "Email with empty recipient should fail"
+    category: edge
+    tags: [input-validation]
+    input:
+      to: ""
+      subject: "Test"
+      body: "Body"
+    output:
+      error: "invalid recipient"

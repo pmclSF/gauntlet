@@ -1,0 +1,14 @@
+{
+  "scenario": "weather_query_nominal",
+  "suite": "smoke",
+  "tool_sequence": ["get_weather"],
+  "output_schema": {
+    "type": "object",
+    "required": ["response"],
+    "properties": {
+      "response": {"type": "string"}
+    }
+  },
+  "required_fields": ["response"],
+  "forbidden_content": []
+}

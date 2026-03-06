@@ -1,0 +1,238 @@
+version: 1
+proposals:
+    - id: disc-db-bank_db-customer-with-sensitive-data
+      name: db_bank_db_customer_with_sensitive_data_seed_test
+      description: 'Auto-discovered: test with bank_db/customer_with_sensitive_data seed set'
+      database: bank_db
+      seed_set: customer_with_sensitive_data
+      tags:
+        - auto-discovered
+        - db-seed
+      status: pending
+      source: db_schema
+    - id: disc-db-bank_db-standard-customer
+      name: db_bank_db_standard_customer_seed_test
+      description: 'Auto-discovered: test with bank_db/standard_customer seed set'
+      database: bank_db
+      seed_set: standard_customer
+      tags:
+        - auto-discovered
+        - db-seed
+      status: pending
+      source: db_schema
+    - id: disc-py-auto-named-nominal
+      name: auto_named_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: auto_named'
+      tool: auto_named
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-customer_balance-insufficient_funds
+      name: customer_balance_insufficient_funds
+      description: 'Auto-discovered: test customer_balance tool in insufficient_funds state'
+      tool: customer_balance
+      variant: insufficient_funds
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-customer_balance-nominal
+      name: customer_balance_nominal
+      description: 'Auto-discovered: test customer_balance tool in nominal state'
+      tool: customer_balance
+      variant: nominal
+      tags:
+        - auto-discovered
+        - framework-pydantic-ai
+        - python-tool
+        - tool-variant
+      status: pending
+      source: python_tool_ast+tool_definition
+    - id: disc-customer_balance-server_error
+      name: customer_balance_server_error
+      description: 'Auto-discovered: test customer_balance tool in server_error state'
+      tool: customer_balance
+      variant: server_error
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-customer_balance-timeout
+      name: customer_balance_timeout
+      description: 'Auto-discovered: test customer_balance tool in timeout state'
+      tool: customer_balance
+      variant: timeout
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-customer_name-nominal
+      name: customer_name_nominal
+      description: 'Auto-discovered: test customer_name tool in nominal state'
+      tool: customer_name
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+        - tool-variant
+      status: pending
+      source: python_tool_ast+tool_definition
+    - id: disc-customer_name-not_found
+      name: customer_name_not_found
+      description: 'Auto-discovered: test customer_name tool in not_found state'
+      tool: customer_name
+      variant: not_found
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-customer_name-server_error
+      name: customer_name_server_error
+      description: 'Auto-discovered: test customer_name tool in server_error state'
+      tool: customer_name
+      variant: server_error
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-customer_name-timeout
+      name: customer_name_timeout
+      description: 'Auto-discovered: test customer_name tool in timeout state'
+      tool: customer_name
+      variant: timeout
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-py-denylist-tool-nominal
+      name: denylist_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: denylist_tool'
+      tool: denylist_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-get-weather-nominal
+      name: get_weather_nominal
+      description: 'Auto-discovered from openai-agents tool decorator: get_weather'
+      tool: get_weather
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+        - framework-openai-agents
+      status: pending
+      source: python_tool_ast
+      framework: openai-agents
+    - id: disc-py-live-tool-nominal
+      name: live_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: live_tool'
+      tool: live_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-meta-tool-nominal
+      name: meta_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: meta_tool'
+      tool: meta_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-missing-tool-nominal
+      name: missing_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: missing_tool'
+      tool: missing_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-multi-tool-nominal
+      name: multi_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: multi_tool'
+      tool: multi_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-order-lookup-nominal
+      name: order_lookup_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: order_lookup'
+      tool: order_lookup
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-passthrough-tool-nominal
+      name: passthrough_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: passthrough_tool'
+      tool: passthrough_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-real-tool-nominal
+      name: real_tool_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: real_tool'
+      tool: real_tool
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-send-email-nominal
+      name: send_email_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: send_email'
+      tool: send_email
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet
+    - id: disc-py-web-search-nominal
+      name: web_search_nominal
+      description: 'Auto-discovered from Python @gauntlet.tool: web_search'
+      tool: web_search
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+      status: pending
+      source: python_tool_ast
+      framework: gauntlet

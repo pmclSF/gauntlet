@@ -1,0 +1,303 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/scenario.json",
+  "title": "Gauntlet Scenario",
+  "description": "Schema for Gauntlet scenario YAML files.",
+  "type": "object",
+  "required": ["scenario", "input"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this scenario."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this scenario tests."
+    },
+    "input": {
+      "type": "object",
+      "description": "Input presented to the target under test.",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["system", "user", "assistant"]
+              },
+              "content": {
+                "oneOf": [
+                  { "type": "string" },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "anyOf": [
+        { "required": ["messages"] },
+        { "required": ["payload"] }
+      ]
+    },
+    "world": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "object",
+          "description": "Map of tool name to state name.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "databases": {
+          "type": "object",
+          "description": "Map of database name to seed-set config.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["seed_sets"],
+                "properties": {
+                  "seed_sets": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "description": "Assertions to evaluate against scenario execution.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "schema"],
+            "properties": {
+              "type": { "const": "output_schema" },
+              "schema": { "type": "object" },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "required"],
+            "properties": {
+              "type": { "const": "tool_sequence" },
+              "required": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              },
+              "forbidden": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "tool", "invariant"],
+            "properties": {
+              "type": { "const": "tool_args_invariant" },
+              "tool": { "type": "string", "minLength": 1 },
+              "invariant": { "type": "string", "minLength": 1 },
+              "require_called": { "type": "boolean", "default": true },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "retry_cap" },
+              "tool": { "type": "string", "minLength": 1 },
+              "max_retries": { "type": "integer", "minimum": 0 },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "token_budget" },
+              "max_tokens": { "type": "integer", "minimum": 0 },
+              "max_prompt_tokens": { "type": "integer", "minimum": 0 },
+              "max_completion_tokens": { "type": "integer", "minimum": 0 },
+              "max_total_tokens": { "type": "integer", "minimum": 0 },
+              "scope": { "type": "string", "enum": ["input_only", "output_only", "total"] },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "max"],
+            "properties": {
+              "type": { "const": "model_call_count" },
+              "max": { "type": "integer", "minimum": 0 },
+              "min": { "type": "integer", "minimum": 0 },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "usd_max"],
+            "properties": {
+              "type": { "const": "cost_budget" },
+              "usd_max": { "type": "number", "minimum": 0 },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "max_ms"],
+            "properties": {
+              "type": { "const": "latency_p99" },
+              "max_ms": { "type": "integer", "minimum": 0 },
+              "scope": { "type": "string", "enum": ["tool_calls", "model_calls", "total"] },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "judge", "prompt"],
+            "properties": {
+              "type": { "const": "semantic_match" },
+              "judge": { "type": "string" },
+              "prompt": { "type": "string", "minLength": 1 },
+              "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "forbidden"],
+            "properties": {
+              "type": { "const": "forbidden_tool" },
+              "forbidden": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "pattern"],
+            "properties": {
+              "type": { "const": "forbidden_content" },
+              "pattern": { "type": "string", "minLength": 1 },
+              "fields": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["output", "tool_args"] },
+                "minItems": 1
+              },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "pii_absent" },
+              "detectors": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["email", "ssn", "credit_card", "phone_us"] },
+                "minItems": 1
+              },
+              "fields": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["output", "tool_args"] },
+                "minItems": 1
+              },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "sensitive_leak" },
+              "description": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "output_derivable" },
+              "description": { "type": "string" }
+            }
+          }
+        ]
+      }
+    },
+    "chaos": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, allows multi-fault scenarios to run."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "beta_model": {
+      "type": "boolean",
+      "default": false
+    },
+    "beta_reason": {
+      "type": "string"
+    }
+  }
+}

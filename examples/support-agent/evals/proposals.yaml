@@ -1,0 +1,165 @@
+version: 1
+proposals:
+    - id: disc-db-orders_db-standard-order
+      name: db_orders_db_standard_order_seed_test
+      description: 'Auto-discovered: test with orders_db/standard_order seed set'
+      database: orders_db
+      seed_set: standard_order
+      tags:
+        - auto-discovered
+        - db-seed
+      status: pending
+      source: db_schema
+    - id: disc-db-orders_db-conflicting-state
+      name: db_orders_db_conflicting_state_seed_test
+      description: 'Auto-discovered: test with orders_db/conflicting_state seed set'
+      database: orders_db
+      seed_set: conflicting_state
+      tags:
+        - auto-discovered
+        - db-seed
+      status: pending
+      source: db_schema
+    - id: disc-ollama_chat-nominal
+      name: ollama_chat_nominal
+      description: 'Auto-discovered: test ollama_chat tool in nominal state'
+      tool: ollama_chat
+      variant: nominal
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-ollama_chat-timeout
+      name: ollama_chat_timeout
+      description: 'Auto-discovered: test ollama_chat tool in timeout state'
+      tool: ollama_chat
+      variant: timeout
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-order_lookup-nominal
+      name: order_lookup_nominal
+      description: 'Auto-discovered: test order_lookup tool in nominal state'
+      tool: order_lookup
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+        - tool-variant
+      status: pending
+      source: python_tool_ast+tool_definition
+    - id: disc-order_lookup-not_found
+      name: order_lookup_not_found
+      description: 'Auto-discovered: test order_lookup tool in not_found state'
+      tool: order_lookup
+      variant: not_found
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-order_lookup-server_error
+      name: order_lookup_server_error
+      description: 'Auto-discovered: test order_lookup tool in server_error state'
+      tool: order_lookup
+      variant: server_error
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-order_lookup-timeout
+      name: order_lookup_timeout
+      description: 'Auto-discovered: test order_lookup tool in timeout state'
+      tool: order_lookup
+      variant: timeout
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-send_email-malformed_response
+      name: send_email_malformed_response
+      description: 'Auto-discovered: test send_email tool in malformed_response state'
+      tool: send_email
+      variant: malformed_response
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-send_email-nominal
+      name: send_email_nominal
+      description: 'Auto-discovered: test send_email tool in nominal state'
+      tool: send_email
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+        - tool-variant
+      status: pending
+      source: python_tool_ast+tool_definition
+    - id: disc-send_email-server_error
+      name: send_email_server_error
+      description: 'Auto-discovered: test send_email tool in server_error state'
+      tool: send_email
+      variant: server_error
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-send_email-timeout
+      name: send_email_timeout
+      description: 'Auto-discovered: test send_email tool in timeout state'
+      tool: send_email
+      variant: timeout
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-web_search-injection
+      name: web_search_injection
+      description: 'Auto-discovered: test web_search tool in injection state'
+      tool: web_search
+      variant: injection
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-web_search-malformed_response
+      name: web_search_malformed_response
+      description: 'Auto-discovered: test web_search tool in malformed_response state'
+      tool: web_search
+      variant: malformed_response
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition
+    - id: disc-web_search-nominal
+      name: web_search_nominal
+      description: 'Auto-discovered: test web_search tool in nominal state'
+      tool: web_search
+      variant: nominal
+      tags:
+        - auto-discovered
+        - python-tool
+        - tool-variant
+      status: pending
+      source: python_tool_ast+tool_definition
+    - id: disc-web_search-server_error
+      name: web_search_server_error
+      description: 'Auto-discovered: test web_search tool in server_error state'
+      tool: web_search
+      variant: server_error
+      tags:
+        - auto-discovered
+        - tool-variant
+      status: pending
+      source: tool_definition

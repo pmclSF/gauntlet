@@ -1,0 +1,15 @@
+{
+  "scenario": "lost_card_block",
+  "suite": "smoke",
+  "tool_sequence": ["customer_name"],
+  "output_schema": {
+    "type": "object",
+    "required": ["response", "block_card", "risk"],
+    "properties": {
+      "block_card": {"type": "boolean", "const": true},
+      "risk": {"type": "integer", "minimum": 5}
+    }
+  },
+  "required_fields": ["response", "block_card", "risk"],
+  "forbidden_content": []
+}

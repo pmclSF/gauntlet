@@ -1,0 +1,12 @@
+{
+  "fixture_id": "0bf286b013eba81c1e776799020e9a50badf1710a136a4aa572e52f505b77c47",
+  "hash_version": 1,
+  "canonical_hash": "0bf286b013eba81c1e776799020e9a50badf1710a136a4aa572e52f505b77c47",
+  "tool_name": "customer_name",
+  "canonical_request": {
+    "tool": "customer_name",
+    "args": {"customer_id": 123}
+  },
+  "response": "John",
+  "recorded_at": "2026-03-03T00:00:00Z"
+}

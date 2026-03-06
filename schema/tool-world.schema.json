@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/tool-world.schema.json",
+  "title": "Gauntlet Tool World",
+  "description": "Schema for tool world definition YAML files that describe simulated external tool behavior.",
+  "type": "object",
+  "required": ["tool"],
+  "additionalProperties": false,
+  "properties": {
+    "tool": {
+      "type": "string",
+      "description": "Unique identifier for this tool."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the tool and its purpose."
+    },
+    "states": {
+      "type": "object",
+      "description": "Named states the tool can be in, each defining different response behavior.",
+      "additionalProperties": {
+        "$ref": "#/definitions/tool_state"
+      }
+    }
+  },
+  "definitions": {
+    "tool_state": {
+      "type": "object",
+      "description": "A single tool state defining either a successful response or an error.",
+      "additionalProperties": false,
+      "properties": {
+        "response": {
+          "description": "The response body returned by the tool in this state. Can be any valid JSON type.",
+          "type": ["object", "array", "string", "number", "boolean", "null"]
+        },
+        "response_code": {
+          "type": "integer",
+          "description": "HTTP-style response code returned with this tool state."
+        },
+        "status_code": {
+          "type": "integer",
+          "description": "Deprecated alias for response_code (supported for backward compatibility)."
+        },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Simulated latency in milliseconds before the response is returned."
+        },
+        "error": {
+          "type": "string",
+          "description": "Error message for failure-mode states."
+        },
+        "behavior": {
+          "type": "string",
+          "description": "Human-readable behavior note for this state."
+        },
+        "agent_expectation": {
+          "type": "string",
+          "description": "Expected agent behavior under this tool state."
+        }
+      }
+    }
+  }
+}

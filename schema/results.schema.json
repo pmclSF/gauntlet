@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/results.schema.json",
+  "title": "Gauntlet Results",
+  "description": "Schema for results.json files produced by a Gauntlet test suite run.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Schema version number for the results format.",
+      "minimum": 1
+    },
+    "suite": {
+      "type": "string",
+      "description": "Name of the test suite that produced these results."
+    },
+    "commit": {
+      "type": "string",
+      "description": "Git commit SHA at the time of the run."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total wall-clock duration of the entire run in milliseconds."
+    },
+    "budget_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Time budget in milliseconds that was configured for the run."
+    },
+    "scenario_budget_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-scenario timeout budget in milliseconds."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Execution mode used for the run (e.g. strict, lenient)."
+    },
+    "egress_blocked": {
+      "type": "boolean",
+      "description": "Whether network egress was blocked during the run."
+    },
+    "history": {
+      "type": "object",
+      "description": "Recent historical run metadata for regression velocity tracking.",
+      "additionalProperties": false,
+      "properties": {
+        "window": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of prior runs included in the history window."
+        },
+        "recent": {
+          "type": "array",
+          "description": "Most recent prior runs (newest first) for the same suite.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "run_id": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "summary": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "total": {"type": "integer", "minimum": 0},
+                  "passed": {"type": "integer", "minimum": 0},
+                  "failed": {"type": "integer", "minimum": 0},
+                  "skipped_budget": {"type": "integer", "minimum": 0},
+                  "error": {"type": "integer", "minimum": 0}
+                }
+              }
+            }
+          }
+        },
+        "previous": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            },
+            "started_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "summary": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "total": {"type": "integer", "minimum": 0},
+                "passed": {"type": "integer", "minimum": 0},
+                "failed": {"type": "integer", "minimum": 0},
+                "skipped_budget": {"type": "integer", "minimum": 0},
+                "error": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
+        },
+        "delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "passed": {"type": "integer"},
+            "failed": {"type": "integer"},
+            "skipped_budget": {"type": "integer"},
+            "error": {"type": "integer"},
+            "pass_rate": {"type": "number"}
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Aggregate counts of scenario outcomes.",
+      "additionalProperties": false,
+      "properties": {
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of scenarios that passed all assertions."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of scenarios that failed one or more assertions."
+        },
+        "skipped_budget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of scenarios skipped because the time budget was exceeded."
+        },
+        "error": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of scenarios that encountered an unexpected error."
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "description": "Per-scenario results.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "description": "The scenario identifier."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped_budget", "error"],
+            "description": "The outcome of this scenario."
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Wall-clock duration of this scenario in milliseconds."
+          },
+          "budget_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Effective timeout budget for this scenario in milliseconds."
+          },
+          "failure_category": {
+            "type": "string",
+            "enum": [
+              "assertion_failure",
+              "infra_failure",
+              "timeout",
+              "budget_exhausted",
+              "nondeterminism_warning"
+            ],
+            "description": "Deterministic causal category for scenario outcome and warnings."
+          },
+          "assertions": {
+            "type": "array",
+            "description": "Results of individual assertions for this scenario.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "The assertion type."
+                },
+                "passed": {
+                  "type": "boolean",
+                  "description": "Whether the assertion passed."
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Diagnostic message explaining the result."
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if the scenario outcome is error."
+          }
+        }
+      }
+    }
+  }
+}

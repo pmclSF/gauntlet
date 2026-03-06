@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gauntlet.dev/schema/db-world.schema.json",
+  "title": "Gauntlet Database World",
+  "description": "Schema for database world definition YAML files that describe simulated database state.",
+  "type": "object",
+  "required": ["database"],
+  "additionalProperties": false,
+  "properties": {
+    "database": {
+      "type": "string",
+      "description": "Unique identifier for this database."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the database and its role in the scenario."
+    },
+    "seed_sets": {
+      "type": "object",
+      "description": "Named sets of seed data that can be loaded into the database. Each key is a seed set name.",
+      "additionalProperties": {
+        "$ref": "#/definitions/seed_set"
+      }
+    }
+  },
+  "definitions": {
+    "seed_set": {
+      "type": "object",
+      "description": "A named collection of table data used to pre-populate the database.",
+      "required": ["tables"],
+      "additionalProperties": false,
+      "properties": {
+        "tables": {
+          "type": "object",
+          "description": "Map of table name to its row data.",
+          "additionalProperties": {
+            "type": "array",
+            "description": "Array of row objects for this table.",
+            "items": {
+              "type": "object",
+              "description": "A single row represented as key-value pairs."
+            }
+          }
+        }
+      }
+    }
+  }
+}

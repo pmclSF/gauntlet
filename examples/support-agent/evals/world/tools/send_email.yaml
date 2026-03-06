@@ -1,0 +1,19 @@
+tool: send_email
+description: Send an email to a customer
+states:
+  nominal:
+    response:
+      status: "sent"
+      message_id: "msg-001"
+
+  server_error:
+    status_code: 500
+    error: "Email service unavailable"
+
+  timeout:
+    delay_ms: 30000
+    error: "connection timed out"
+
+  malformed_response:
+    response:
+      status: null
