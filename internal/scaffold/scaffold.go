@@ -149,20 +149,9 @@ type astOutput struct {
 }
 
 // extractSignatures runs the embedded Python AST script to extract tool signatures.
+// It scans all Python files in rootDir and uses the AST to extract full function
+// signatures for the tools named in proposals.
 func extractSignatures(rootDir string, proposals []discovery.Proposal) ([]ToolSignature, error) {
-	// Group tools by file — we need the file from the proposal's description
-	// Since proposals don't carry file path, we re-run discovery to get it
-	engine := discovery.NewEngine(discovery.DiscoveryConfig{
-		RootDir:    rootDir,
-		PythonDirs: []string{"."},
-	})
-	allProposals, err := engine.Discover()
-	if err != nil {
-		return nil, fmt.Errorf("re-discovery failed: %w", err)
-	}
-
-	// Match proposals to get file paths from the full discovery results
-	// For now, scan all Python files mentioned in proposals
 	proposalNames := map[string]bool{}
 	for _, p := range proposals {
 		proposalNames[p.Tool] = true
@@ -171,7 +160,7 @@ func extractSignatures(rootDir string, proposals []discovery.Proposal) ([]ToolSi
 	// We need to find which files contain which tools
 	// Use a simple approach: collect all .py files and let AST filter
 	var pyFiles []string
-	err = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -215,8 +204,8 @@ func extractSignatures(rootDir string, proposals []discovery.Proposal) ([]ToolSi
 		return nil, err
 	}
 
-	// TODO(stage6): Duplicates Python tool discovery from internal/discovery/python.go (regex-based).
-	// Run Python AST extractor
+	// Run Python AST extractor (complements regex-based discovery in discovery/python.go
+	// by extracting full signatures; framework module maps must stay in sync)
 	cmd := exec.Command("python3", "-c", astExtractScript)
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 	cmd.Dir = rootDir
@@ -261,8 +250,6 @@ func extractSignatures(rootDir string, proposals []discovery.Proposal) ([]ToolSi
 		}
 	}
 
-	// Use proposal framework info to augment (in case AST didn't categorize)
-	_ = allProposals
 	return sigs, nil
 }
 

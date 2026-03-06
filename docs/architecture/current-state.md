@@ -144,7 +144,7 @@ Sites where errors are silently discarded or only logged:
 
 ## Known Duplications
 
-1. **Python discovery**: Both `internal/discovery/python.go` and `internal/scaffold/scaffold.go` scan for `@gauntlet.tool` / `@tool` decorators via separate mechanisms. Discovery uses regex; scaffold shells out to `python3 -c` for AST parsing.
+1. **Python discovery**: `internal/discovery/python.go` (regex) and `internal/scaffold/ast_extract.py` (AST) both detect tool decorators. This is intentional — regex is fast for proposal generation, AST is needed for full signature extraction. **Rationalized (Stage 6)**: removed redundant re-discovery in scaffold, added cross-reference comments. Framework module maps must be kept in sync between the two files.
 
 2. ~~**Egress wrapping**: Both `internal/runner/egress.go` and `internal/tut/process.go` independently implement `sandbox-exec` (macOS) and `unshare --net` (Linux) command wrapping with different argument construction.~~ **Fixed (Stage 1)** — unified in `internal/sandbox/sandbox.go`.
 
