@@ -12,7 +12,7 @@ defaults:
   runner_mode: local
   model_mode: live
 
-scenarios_dir: evals/smoke
-world_dir: evals/world
-fixtures_dir: evals/fixtures
-baselines_dir: evals/baselines/smoke
+scenarios_dir: smoke
+world_dir: world
+fixtures_dir: fixtures
+baselines_dir: baselines/smoke
