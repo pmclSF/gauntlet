@@ -215,6 +215,7 @@ func extractSignatures(rootDir string, proposals []discovery.Proposal) ([]ToolSi
 		return nil, err
 	}
 
+	// TODO(stage6): Duplicates Python tool discovery from internal/discovery/python.go (regex-based).
 	// Run Python AST extractor
 	cmd := exec.Command("python3", "-c", astExtractScript)
 	cmd.Stdin = strings.NewReader(string(inputJSON))

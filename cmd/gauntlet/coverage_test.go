@@ -106,6 +106,7 @@ func TestRunCmd_PassesMinimalSuite(t *testing.T) {
 		"--config", "evals/gauntlet.yml",
 		"--auto-discover=false",
 		"--output-dir", "evals/runs/manual",
+		"--runner-mode", "local",
 	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("run command failed: %v\noutput:\n%s", err, out.String())

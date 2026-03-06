@@ -963,6 +963,29 @@ func TestBuildTUTConfig_ForkPRRestrictsHostEnvAndStripsSecrets(t *testing.T) {
 	}
 }
 
+func TestBuildTUTConfig_PRCIRestrictsHostEnvAndStripsSecrets(t *testing.T) {
+	r := NewRunner(Config{
+		Mode: "pr_ci",
+		TUTConfig: tut.Config{
+			Env: map[string]string{
+				"SAFE_VAR":       "ok",
+				"OPENAI_API_KEY": "secret",
+			},
+		},
+	})
+
+	cfg := r.buildTUTConfig(true)
+	if !cfg.RestrictHostEnv {
+		t.Fatal("expected RestrictHostEnv=true in pr_ci mode")
+	}
+	if _, ok := cfg.Env["OPENAI_API_KEY"]; ok {
+		t.Fatal("OPENAI_API_KEY should be stripped in pr_ci mode")
+	}
+	if got := cfg.Env["SAFE_VAR"]; got != "ok" {
+		t.Fatalf("SAFE_VAR = %q, want ok", got)
+	}
+}
+
 func TestBuildTUTConfig_LocalKeepsEnvAndHostInheritance(t *testing.T) {
 	r := NewRunner(Config{
 		Mode: "local",
