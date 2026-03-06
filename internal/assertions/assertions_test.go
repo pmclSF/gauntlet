@@ -20,8 +20,13 @@ func TestRegistryContainsAllEightTypes(t *testing.T) {
 		"tool_args_invariant",
 		"retry_cap",
 		"token_budget",
+		"model_call_count",
+		"cost_budget",
+		"latency_p99",
+		"semantic_match",
 		"forbidden_tool",
 		"forbidden_content",
+		"pii_absent",
 		"output_derivable",
 		"sensitive_leak",
 	}
@@ -62,8 +67,12 @@ func TestIsSoftValues(t *testing.T) {
 		"tool_args_invariant",
 		"retry_cap",
 		"token_budget",
+		"model_call_count",
+		"cost_budget",
+		"latency_p99",
 		"forbidden_tool",
 		"forbidden_content",
+		"pii_absent",
 	}
 	for _, name := range hardTypes {
 		a, ok := Get(name)
@@ -79,6 +88,7 @@ func TestIsSoftValues(t *testing.T) {
 	softTypes := []string{
 		"output_derivable",
 		"sensitive_leak",
+		"semantic_match",
 	}
 	for _, name := range softTypes {
 		a, ok := Get(name)

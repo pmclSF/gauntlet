@@ -214,8 +214,13 @@
               "tool_sequence",
               "tool_args_invariant",
               "retry_cap",
+              "model_call_count",
+              "cost_budget",
+              "latency_p99",
+              "semantic_match",
               "forbidden_tool",
               "forbidden_content",
+              "pii_absent",
               "output_derivable",
               "sensitive_leak"
             ]
@@ -230,8 +235,13 @@
               "tool_sequence",
               "tool_args_invariant",
               "retry_cap",
+              "model_call_count",
+              "cost_budget",
+              "latency_p99",
+              "semantic_match",
               "forbidden_tool",
               "forbidden_content",
+              "pii_absent",
               "output_derivable",
               "sensitive_leak"
             ]

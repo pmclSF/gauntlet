@@ -355,6 +355,7 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	// Build assertion context
 	assertCtx := assertions.Context{
 		ScenarioName: s.Name,
+		RunnerMode:   r.Config.Mode,
 		Input:        s.Input,
 		Output:       agentOutput,
 		ToolTrace:    toolTrace,
