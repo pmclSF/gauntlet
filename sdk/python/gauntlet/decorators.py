@@ -13,7 +13,9 @@ import functools
 import hashlib
 import inspect
 import json
+import math
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -46,6 +48,26 @@ DENYLIST_PREFIXES = ("metadata.", "extra_headers.")
 _fixture_lock_loaded = False
 _fixture_lock_index: dict[str, str] = {}
 _lock_index_lock = threading.Lock()
+
+_OPENAI_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9]{16,}\b")
+_BEARER_PATTERN = re.compile(
+    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{10,}\b"
+)
+_API_KEY_ASSIGN_PATTERN = re.compile(
+    r"(?i)\bapi[_-]?key\b\s*[:=]\s*['\"]?[A-Za-z0-9._~+/=-]{8,}"
+)
+_CREDENTIAL_FIELD_MARKERS = (
+    "authorization",
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "private_key",
+    "access_key",
+    "client_secret",
+)
 
 
 def _env_flag(name: str) -> bool:
@@ -519,6 +541,89 @@ def _field_matches(field_name: str, pattern: str) -> bool:
     return field_name == pattern
 
 
+def _allow_sensitive_fixture() -> bool:
+    return _env_flag("GAUNTLET_ALLOW_SENSITIVE_FIXTURE")
+
+
+def _sensitive_path_marker(path: str) -> bool:
+    normalized = path.lower().replace("[", ".").replace("]", "")
+    tokens = [part for part in normalized.split(".") if part]
+    return any(token in _CREDENTIAL_FIELD_MARKERS for token in tokens)
+
+
+def _high_entropy(s: str) -> bool:
+    if len(s) <= 20:
+        return False
+    counts: dict[str, int] = {}
+    for ch in s:
+        counts[ch] = counts.get(ch, 0) + 1
+    entropy = 0.0
+    length = float(len(s))
+    for count in counts.values():
+        p = count / length
+        entropy -= p * math.log2(p)
+    return entropy > 4.5
+
+
+def _scan_sensitive_value(value: Any, path: str) -> Optional[tuple[str, str]]:
+    if isinstance(value, dict):
+        for key in sorted(value.keys()):
+            child_path = f"{path}.{key}" if path else str(key)
+            finding = _scan_sensitive_value(value[key], child_path)
+            if finding is not None:
+                return finding
+        return None
+    if isinstance(value, list):
+        for idx, item in enumerate(value):
+            child_path = f"{path}[{idx}]" if path else f"[{idx}]"
+            finding = _scan_sensitive_value(item, child_path)
+            if finding is not None:
+                return finding
+        return None
+    if not isinstance(value, str):
+        return None
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+    if _BEARER_PATTERN.search(candidate):
+        return path, "Bearer token detected"
+    if _OPENAI_KEY_PATTERN.search(candidate):
+        return path, "OpenAI-style API key detected"
+    if _API_KEY_ASSIGN_PATTERN.search(candidate):
+        return path, "API key assignment detected"
+    if _sensitive_path_marker(path):
+        return path, "Credential-like field detected"
+    if _high_entropy(candidate):
+        return path, "High-entropy secret-like string detected"
+    return None
+
+
+def _scan_sensitive_fixture_content(
+    args_dict: dict[str, Any], canonical_request: dict[str, Any], response: Any
+) -> Optional[tuple[str, str]]:
+    for root, value in (
+        ("args", args_dict),
+        ("canonical_request", canonical_request),
+        ("response", response),
+    ):
+        finding = _scan_sensitive_value(value, root)
+        if finding is not None:
+            return finding
+    return None
+
+
+def _sensitive_fixture_error(tool_name: str, field: str, pattern: str) -> str:
+    return (
+        f"ERROR: sensitive data detected in fixture for tool '{tool_name}'\n"
+        f"  field: {field}\n"
+        f"  pattern: {pattern}\n\n"
+        "  If this is a false positive, set:\n"
+        "    GAUNTLET_ALLOW_SENSITIVE_FIXTURE=1 gauntlet record\n\n"
+        "  If this is real credential data, do not commit this fixture."
+    )
+
+
 def _save_fixture(
     tool_name: str,
     args_dict: dict[str, Any],
@@ -539,6 +644,16 @@ def _save_fixture(
         patterns = [p.strip() for p in redact_fields.split(",") if p.strip()]
         stored_result = _redact_fields(result, patterns)
 
+    canonical_request = json.loads(canonical_bytes.decode())
+    sensitive_finding = _scan_sensitive_fixture_content(
+        args_dict=args_dict,
+        canonical_request=canonical_request,
+        response=stored_result,
+    )
+    if sensitive_finding is not None and not _allow_sensitive_fixture():
+        field, pattern = sensitive_finding
+        raise RuntimeError(_sensitive_fixture_error(tool_name, field, pattern))
+
     fixture_path = os.path.join(fixture_dir, f"{fixture_hash}.json")
     fixture_data = {
         "fixture_id": fixture_hash,
@@ -547,7 +662,7 @@ def _save_fixture(
         "tool_name": tool_name,
         "args_hash": fixture_hash,
         "args": args_dict,
-        "canonical_request": json.loads(canonical_bytes.decode()),
+        "canonical_request": canonical_request,
         "response": stored_result,
         "recorded_at": datetime.now(timezone.utc)
         .isoformat()

@@ -24,6 +24,7 @@ type Assertion interface {
 // Context provides all data needed for assertion evaluation.
 type Context struct {
 	ScenarioName string
+	RunnerMode   string
 	Input        scenario.Input
 	Output       tut.AgentOutput
 	ToolTrace    []tut.TraceEvent
@@ -131,7 +132,12 @@ func init() {
 	Register(&RetryCapAssertion{})
 	Register(&ForbiddenToolAssertion{})
 	Register(&ForbiddenContentAssertion{})
+	Register(&PIIAbsentAssertion{})
 	Register(&OutputDerivableAssertion{})
 	Register(&SensitiveLeakAssertion{})
+	Register(&ModelCallCountAssertion{})
+	Register(&CostBudgetAssertion{})
+	Register(&LatencyP99Assertion{})
+	Register(&SemanticMatchAssertion{})
 	Register(&TokenBudgetAssertion{})
 }
