@@ -68,7 +68,7 @@ def connect() -> None:
                 seed = int(rng_seed)
                 random.seed(seed)
                 try:
-                    import numpy
+                    import numpy  # type: ignore[import-not-found,unused-ignore]
 
                     numpy.random.seed(seed)
                 except ImportError:
@@ -206,7 +206,7 @@ def _patch_httpx_proxy(proxy: str) -> None:
 
 def _set_requests_proxy_defaults() -> None:
     try:
-        import requests
+        import requests  # type: ignore[import-untyped,unused-ignore]
     except ImportError:
         return
 

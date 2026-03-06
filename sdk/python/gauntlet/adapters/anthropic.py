@@ -65,6 +65,10 @@ def _extract_payload(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
             return _to_plain(value)
     if len(args) >= 2:
         return _to_plain(args[1])
+    # Resource-level calls (e.g. messages.create) pass API params
+    # directly as kwargs — use them as the payload for model extraction.
+    if "model" in kwargs:
+        return dict(kwargs)
     return None
 
 

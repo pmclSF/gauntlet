@@ -3,11 +3,8 @@ package runner
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -103,42 +100,3 @@ func isLikelyBlockedEgress(err error) bool {
 		strings.Contains(msg, "no route to host")
 }
 
-// WrapWithEgressBlock wraps a command to block network egress.
-// Uses platform-specific mechanisms.
-func WrapWithEgressBlock(cmd *exec.Cmd) (*exec.Cmd, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		return wrapDarwin(cmd)
-	case "linux":
-		return wrapLinux(cmd)
-	default:
-		return nil, fmt.Errorf("egress blocking not supported on %s — run in a container", runtime.GOOS)
-	}
-}
-
-func wrapDarwin(cmd *exec.Cmd) (*exec.Cmd, error) {
-	// Use sandbox-exec with a deny-network profile
-	profile := `(version 1)(allow default)(deny network*)`
-	args := []string{"-p", profile, cmd.Path}
-	args = append(args, cmd.Args[1:]...)
-	wrapped := exec.Command("sandbox-exec", args...)
-	wrapped.Dir = cmd.Dir
-	wrapped.Env = cmd.Env
-	wrapped.Stdin = cmd.Stdin
-	wrapped.Stdout = cmd.Stdout
-	wrapped.Stderr = cmd.Stderr
-	return wrapped, nil
-}
-
-func wrapLinux(cmd *exec.Cmd) (*exec.Cmd, error) {
-	// Use unshare --net to create a new network namespace
-	args := []string{"--net", cmd.Path}
-	args = append(args, cmd.Args[1:]...)
-	wrapped := exec.Command("unshare", args...)
-	wrapped.Dir = cmd.Dir
-	wrapped.Env = cmd.Env
-	wrapped.Stdin = cmd.Stdin
-	wrapped.Stdout = cmd.Stdout
-	wrapped.Stderr = cmd.Stderr
-	return wrapped, nil
-}

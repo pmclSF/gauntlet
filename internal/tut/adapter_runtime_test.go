@@ -224,19 +224,13 @@ func TestProcessWrappers_BuildStableCommands(t *testing.T) {
 		t.Fatalf("expected max process limit in args: %v", guarded.Args)
 	}
 
-	darwinWrapped, err := wrapDarwin(base)
+	// Egress wrapping is now tested in internal/sandbox package.
+	egressWrapped, err := wrapWithEgressBlock(base)
 	if err != nil {
-		t.Fatalf("wrapDarwin: %v", err)
+		t.Fatalf("wrapWithEgressBlock: %v", err)
 	}
-	if filepath.Base(darwinWrapped.Path) != "sandbox-exec" {
-		t.Fatalf("wrapDarwin path = %q, want sandbox-exec basename", darwinWrapped.Path)
-	}
-
-	linuxWrapped, err := wrapLinux(base)
-	if err != nil {
-		t.Fatalf("wrapLinux: %v", err)
-	}
-	if filepath.Base(linuxWrapped.Path) != "unshare" {
-		t.Fatalf("wrapLinux path = %q, want unshare basename", linuxWrapped.Path)
+	egressBase := filepath.Base(egressWrapped.Path)
+	if egressBase != "sandbox-exec" && egressBase != "unshare" {
+		t.Fatalf("wrapWithEgressBlock path = %q, want sandbox-exec or unshare basename", egressWrapped.Path)
 	}
 }

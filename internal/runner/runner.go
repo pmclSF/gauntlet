@@ -226,6 +226,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	for _, exec := range executions {
 		sr := exec.Result
 		if sr.Status == "failed" || sr.Status == "error" {
+			// TODO(stage9): Do not discard this error — artifact write failures should be surfaced.
 			_ = output.WriteArtifactBundleWithLimit(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput, r.Config.MaxArtifactBytes)
 		}
 	}
@@ -824,7 +825,7 @@ func getRequiredFields(bl *baseline.Contract) []string {
 func (r *Runner) buildTUTConfig(requiresBlockedEgress bool) tut.Config {
 	cfg := r.Config.TUTConfig
 	cfg.Env = cloneStringMap(cfg.Env)
-	if r.Config.Mode == "fork_pr" {
+	if r.Config.Mode == "fork_pr" || r.Config.Mode == "pr_ci" {
 		cfg.RestrictHostEnv = true
 		cfg.Env = stripSensitiveEnv(cfg.Env)
 	}
