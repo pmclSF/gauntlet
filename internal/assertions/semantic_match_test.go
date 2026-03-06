@@ -1,6 +1,7 @@
 package assertions
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -125,6 +126,61 @@ func TestSemanticMatch_MissingJudgeFails(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "missing required field 'judge'") {
 		t.Fatalf("unexpected message: %s", result.Message)
+	}
+}
+
+func TestSemanticMatch_InjectableJudgeFunc(t *testing.T) {
+	a := &SemanticMatchAssertion{
+		Judge: func(model, prompt, output string) (float64, string, error) {
+			if model != "test-model" {
+				t.Fatalf("judge received model %q, want test-model", model)
+			}
+			return 0.92, "looks good", nil
+		},
+	}
+	ctx := Context{
+		RunnerMode: "nightly",
+		Spec: map[string]interface{}{
+			"judge":     "test-model",
+			"prompt":    "confirm order",
+			"threshold": 0.8,
+		},
+		Output: tut.AgentOutput{
+			Raw: []byte(`{"response":"Order confirmed"}`),
+		},
+	}
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Fatalf("expected pass with injected judge, got: %s", result.Message)
+	}
+	if !strings.Contains(result.Message, "0.92") {
+		t.Fatalf("expected score in message, got: %s", result.Message)
+	}
+}
+
+func TestSemanticMatch_InjectableJudgeError(t *testing.T) {
+	a := &SemanticMatchAssertion{
+		Judge: func(model, prompt, output string) (float64, string, error) {
+			return 0, "", fmt.Errorf("judge unavailable")
+		},
+	}
+	ctx := Context{
+		RunnerMode: "nightly",
+		Spec: map[string]interface{}{
+			"judge":     "test-model",
+			"prompt":    "confirm order",
+			"threshold": 0.8,
+		},
+		Output: tut.AgentOutput{
+			Raw: []byte(`{"response":"Order confirmed"}`),
+		},
+	}
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected judge error failure")
+	}
+	if result.DocketHint != docketTagJudgeError {
+		t.Fatalf("docket hint = %q, want %q", result.DocketHint, docketTagJudgeError)
 	}
 }
 
