@@ -106,7 +106,10 @@ func seedTableDef(db *sql.DB, table string, td *TableDef) error {
 			v := row[c]
 			switch val := v.(type) {
 			case map[string]interface{}, []interface{}:
-				b, _ := json.Marshal(val)
+				b, jsonErr := json.Marshal(val)
+				if jsonErr != nil {
+					return fmt.Errorf("INSERT INTO %s: failed to marshal column %q: %w", table, c, jsonErr)
+				}
 				vals[i] = string(b)
 			default:
 				vals[i] = v

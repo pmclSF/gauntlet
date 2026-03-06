@@ -15,7 +15,7 @@ Generated as part of the adversarial review remediation, Stage 0.
 ### `internal/runner/` — Scenario orchestration
 - Loads scenarios, assembles world state, invokes TUT, evaluates assertions, writes output.
 - Imports: `assertions`, `baseline`, `determinism`, `docket`, `output`, `scenario`, `tut`, `world`.
-- Contains egress-blocking wrappers (`egress.go`) that duplicate logic in `tut/process.go`.
+- Contains egress probing logic (`egress.go`). Sandbox wrapping unified in `internal/sandbox/` (Stage 1).
 
 ### `internal/tut/` — Test-Under-Test execution
 - Two harnesses: `cli.go` (subprocess) and `http.go` (HTTP server).
@@ -134,9 +134,9 @@ Sites where errors are silently discarded or only logged:
 
 | Location | Error | Severity | Impact |
 |----------|-------|----------|--------|
-| `runner/runner.go:229` | `_ = output.WriteArtifactBundleWithLimit(...)` | **Critical** | Failed artifact writes silently lost |
-| `api/api.go:382-384` | `log.Printf("WARN: ...")` on `saveProposals` failure | **Critical** | Proposal mutations may silently fail |
-| `runner/runner.go:949` | `getCommit()` returns `"unknown"` on error | Low | Cosmetic — commit hash in run metadata |
+| ~~`runner/runner.go:229`~~ | ~~`_ = output.WriteArtifactBundleWithLimit(...)`~~ | ~~**Critical**~~ | **Fixed (Stage 5)** — errors now collected and returned |
+| ~~`api/api.go:382-384`~~ | ~~`log.Printf("WARN: ...")` on `saveProposals` failure~~ | ~~**Critical**~~ | **Fixed (Stage 3)** — errors now returned as HTTP 500 |
+| `runner/runner.go` | `getCommit()` returns `"unknown"` on error | Low | Cosmetic — commit hash in run metadata |
 | `tut/process.go` | Multiple `exec.Command` wrapper sites | Medium | Sandbox setup failures may not propagate |
 | `fixture/store.go` | Index load errors in some paths | Medium | Could mask fixture corruption |
 
@@ -144,9 +144,9 @@ Sites where errors are silently discarded or only logged:
 
 ## Known Duplications
 
-1. **Python discovery**: Both `internal/discovery/python.go` and `internal/scaffold/scaffold.go` scan for `@gauntlet.tool` / `@tool` decorators via separate mechanisms. Discovery uses regex; scaffold shells out to `python3 -c` for AST parsing.
+1. **Python discovery**: `internal/discovery/python.go` (regex) and `internal/scaffold/ast_extract.py` (AST) both detect tool decorators. This is intentional — regex is fast for proposal generation, AST is needed for full signature extraction. **Rationalized (Stage 6)**: removed redundant re-discovery in scaffold, added cross-reference comments. Framework module maps must be kept in sync between the two files.
 
-2. **Egress wrapping**: Both `internal/runner/egress.go` and `internal/tut/process.go` independently implement `sandbox-exec` (macOS) and `unshare --net` (Linux) command wrapping with different argument construction.
+2. ~~**Egress wrapping**: Both `internal/runner/egress.go` and `internal/tut/process.go` independently implement `sandbox-exec` (macOS) and `unshare --net` (Linux) command wrapping with different argument construction.~~ **Fixed (Stage 1)** — unified in `internal/sandbox/sandbox.go`.
 
 3. **Adapter boilerplate**: `sdk/python/gauntlet/adapters/openai.py` and `anthropic.py` are ~95% identical (same `_to_plain`, `_extract_payload`, `_extract_endpoint`, `_emit_model_call`, `_wrap_callable`, `_instrument_method`, `_instrument_resource_create`, `_instrument_client`, `_patch_client_constructor`). Only the provider name and resource paths differ.
 

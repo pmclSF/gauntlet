@@ -12,8 +12,22 @@ import (
 	"time"
 )
 
+// Docket tag hints for semantic match failures.
+// These must match the constants in internal/docket/tags.go.
+const (
+	docketTagJudgeError     = "assertion.judge_error"
+	docketTagSemanticMatch  = "output.semantic_mismatch"
+)
+
+// JudgeFunc scores candidate output against a requirement using a judge model.
+// Returns a score in [0.0, 1.0], a reason string, and any error.
+type JudgeFunc func(judgeModel, prompt, output string) (float64, string, error)
+
 // SemanticMatchAssertion runs a semantic match judge in trusted nightly mode.
-type SemanticMatchAssertion struct{}
+type SemanticMatchAssertion struct {
+	// Judge overrides the default HTTP-based judge for testing.
+	Judge JudgeFunc
+}
 
 func (a *SemanticMatchAssertion) Type() string { return "semantic_match" }
 func (a *SemanticMatchAssertion) IsSoft() bool { return true }
@@ -85,18 +99,22 @@ func (a *SemanticMatchAssertion) Evaluate(ctx Context) Result {
 			Passed:        false,
 			Soft:          true,
 			Message:       "semantic_match: output is empty",
-			DocketHint:    "output.semantic_mismatch",
+			DocketHint:    docketTagSemanticMatch,
 		}
 	}
 
-	score, reason, err := semanticJudgeScore(judgeModel, prompt, outputText)
+	judge := a.Judge
+	if judge == nil {
+		judge = semanticJudgeScore
+	}
+	score, reason, err := judge(judgeModel, prompt, outputText)
 	if err != nil {
 		return Result{
 			AssertionType: a.Type(),
 			Passed:        false,
 			Soft:          true,
 			Message:       fmt.Sprintf("semantic_match: judge call failed: %v", err),
-			DocketHint:    "assertion.judge_error",
+			DocketHint:    docketTagJudgeError,
 		}
 	}
 	if score < threshold {
@@ -111,7 +129,7 @@ func (a *SemanticMatchAssertion) Evaluate(ctx Context) Result {
 			Expected:      fmt.Sprintf("semantic score >= %.2f", threshold),
 			Actual:        actual,
 			Message:       fmt.Sprintf("semantic_match: score %.2f below threshold %.2f", score, threshold),
-			DocketHint:    "output.semantic_mismatch",
+			DocketHint:    docketTagSemanticMatch,
 		}
 	}
 	message := fmt.Sprintf("semantic_match: score %.2f meets threshold %.2f", score, threshold)

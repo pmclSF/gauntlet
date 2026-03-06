@@ -435,7 +435,7 @@ seed_sets:
 		t.Fatalf("failed to write DB: %v", err)
 	}
 
-	state, err := Assemble(toolsDir, dbDir, nil, nil)
+	state, err := Assemble(toolsDir, dbDir)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}
@@ -456,7 +456,7 @@ seed_sets:
 func TestAssemble_EmptyDirectories(t *testing.T) {
 	toolsDir := t.TempDir()
 	dbDir := t.TempDir()
-	state, err := Assemble(toolsDir, dbDir, nil, nil)
+	state, err := Assemble(toolsDir, dbDir)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestAssemble_EmptyDirectories(t *testing.T) {
 
 func TestAssemble_NonexistentDirsAreOK(t *testing.T) {
 	// Empty string dirs should not trigger errors
-	state, err := Assemble("", "", nil, nil)
+	state, err := Assemble("", "")
 	if err != nil {
 		t.Fatalf("Assemble with empty dirs failed: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestAssemble_MultipleToolFiles(t *testing.T) {
 		}
 	}
 
-	state, err := Assemble(toolsDir, "", nil, nil)
+	state, err := Assemble(toolsDir, "")
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}

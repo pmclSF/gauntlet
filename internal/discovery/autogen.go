@@ -88,7 +88,7 @@ func EnsureAutoSuite(cfg AutoSuiteConfig) (*AutoSuiteResult, error) {
 		}
 	}
 
-	ws, err := world.Assemble(cfg.ToolsDir, cfg.DBDir, nil, nil)
+	ws, err := world.Assemble(cfg.ToolsDir, cfg.DBDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load world definitions for auto scenarios: %w", err)
 	}
