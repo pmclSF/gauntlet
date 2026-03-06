@@ -140,8 +140,13 @@ func TestCohereAndUnknownNormalizers_CoverAllMethods(t *testing.T) {
 	if _, ok := uc.Extra["foo"]; !ok {
 		t.Fatalf("expected unknown extra fields to be preserved: %+v", uc.Extra)
 	}
-	if _, err := unknown.Normalize("example.com", "/v1/anything", nil, []byte(`not-json`)); err == nil {
-		t.Fatal("expected unknown Normalize to fail on invalid json")
+	// Non-JSON bodies should succeed (stored as raw body fallback)
+	nonJSON, err := unknown.Normalize("example.com", "/v1/anything", nil, []byte(`not-json`))
+	if err != nil {
+		t.Fatalf("expected unknown Normalize to handle non-JSON gracefully: %v", err)
+	}
+	if nonJSON.Extra["_raw_body"] != "not-json" {
+		t.Fatalf("expected _raw_body in Extra, got: %+v", nonJSON.Extra)
 	}
 }
 
@@ -193,5 +198,37 @@ func TestUnknownNormalizerRoundTripJSON(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("expected non-empty canonical json")
+	}
+}
+
+func TestUnknownNormalizer_NonJSONBody(t *testing.T) {
+	n := &UnknownNormalizer{}
+	cr, err := n.Normalize("example.com", "/health", nil, []byte("plain text body"))
+	if err != nil {
+		t.Fatalf("Normalize should not fail on non-JSON: %v", err)
+	}
+	if cr.ProviderFamily != "unknown" {
+		t.Errorf("ProviderFamily = %q, want unknown", cr.ProviderFamily)
+	}
+	raw, ok := cr.Extra["_raw_body"]
+	if !ok {
+		t.Fatal("expected _raw_body in Extra")
+	}
+	if raw != "plain text body" {
+		t.Errorf("_raw_body = %q, want %q", raw, "plain text body")
+	}
+}
+
+func TestUnknownNormalizer_EmptyBody(t *testing.T) {
+	n := &UnknownNormalizer{}
+	cr, err := n.Normalize("example.com", "/v1/models", nil, nil)
+	if err != nil {
+		t.Fatalf("Normalize should not fail on empty body: %v", err)
+	}
+	if cr.ProviderFamily != "unknown" {
+		t.Errorf("ProviderFamily = %q, want unknown", cr.ProviderFamily)
+	}
+	if cr.Extra["_path"] != "/v1/models" {
+		t.Errorf("_path = %v, want /v1/models", cr.Extra["_path"])
 	}
 }

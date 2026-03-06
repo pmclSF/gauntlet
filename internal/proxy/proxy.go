@@ -4,13 +4,9 @@
 package proxy
 
 import (
-	"context"
-	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/pmclSF/gauntlet/internal/fixture"
 	"github.com/pmclSF/gauntlet/internal/proxy/providers"
@@ -72,70 +68,6 @@ func NewProxy(addr string, mode Mode, store *fixture.Store, ca *CA) *Proxy {
 		CA:                 ca,
 		Redactor:           redaction.DefaultRedactor(),
 	}
-}
-
-// Start begins listening for proxy connections.
-func (p *Proxy) Start(ctx context.Context) error {
-	p.server = &http.Server{
-		Addr:           p.Addr,
-		Handler:        http.HandlerFunc(p.handleRequest),
-		MaxHeaderBytes: p.effectiveMaxHeaderBytes(),
-	}
-
-	ln, err := net.Listen("tcp", p.Addr)
-	if err != nil {
-		return fmt.Errorf("proxy failed to listen on %s: %w", p.Addr, err)
-	}
-	// Persist the resolved listener address (important when configured with :0).
-	p.Addr = ln.Addr().String()
-	p.listener = ln
-
-	go func() {
-		if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("proxy server error: %v", err)
-		}
-	}()
-
-	return nil
-}
-
-// Stop shuts down the proxy.
-func (p *Proxy) Stop() error {
-	if p.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		return p.server.Shutdown(ctx)
-	}
-	return nil
-}
-
-// EnvVars returns the environment variables to inject into the TUT process.
-func (p *Proxy) EnvVars(caCertPath string) []string {
-	proxyPort := ""
-	if _, port, err := net.SplitHostPort(p.Addr); err == nil {
-		proxyPort = port
-	}
-
-	vars := []string{
-		"HTTP_PROXY=http://" + p.Addr,
-		"HTTPS_PROXY=http://" + p.Addr,
-		"ALL_PROXY=http://" + p.Addr,
-		"http_proxy=http://" + p.Addr,
-		"https_proxy=http://" + p.Addr,
-		"all_proxy=http://" + p.Addr,
-	}
-	if proxyPort != "" {
-		vars = append(vars, "GAUNTLET_PROXY_PORT="+proxyPort)
-	}
-	vars = append(vars,
-		// Clear no_proxy so localhost/loopback requests are still routed via proxy.
-		"NO_PROXY=",
-		"no_proxy=",
-	)
-	if p.CA != nil {
-		vars = append(vars, p.CA.EnvVars(caCertPath)...)
-	}
-	return vars
 }
 
 // handleRequest is the top-level HTTP handler that dispatches CONNECT vs

@@ -91,10 +91,15 @@ func TestHandleRecorded_ReplayStatusCodes(t *testing.T) {
 			store, canonicalBytes, hash := setupReplayFixture(t, tt.responseCode, json.RawMessage(`{"ok":true}`))
 
 			p := &Proxy{Mode: ModeRecorded, Store: store}
-			norm := &stubNormalizer{}
-			canonical := replayTestCanonicalRequest()
+			ir := &interceptedRequest{
+				Normalizer:     &stubNormalizer{},
+				Canonical:      replayTestCanonicalRequest(),
+				CanonicalBytes: canonicalBytes,
+				Hash:           hash,
+				Start:          time.Now(),
+			}
 
-			_, status, err := p.handleRecorded(norm, canonical, canonicalBytes, hash, time.Now())
+			_, status, err := p.handleRecorded(ir)
 			if err != nil {
 				t.Fatalf("handleRecorded failed: %v", err)
 			}
@@ -111,10 +116,15 @@ func TestHandleRecorded_BackwardCompat_NoResponseCode(t *testing.T) {
 	store, canonicalBytes, hash := setupReplayFixture(t, 0, json.RawMessage(`{"ok":true}`))
 
 	p := &Proxy{Mode: ModeRecorded, Store: store}
-	norm := &stubNormalizer{}
-	canonical := replayTestCanonicalRequest()
+	ir := &interceptedRequest{
+		Normalizer:     &stubNormalizer{},
+		Canonical:      replayTestCanonicalRequest(),
+		CanonicalBytes: canonicalBytes,
+		Hash:           hash,
+		Start:          time.Now(),
+	}
 
-	_, status, err := p.handleRecorded(norm, canonical, canonicalBytes, hash, time.Now())
+	_, status, err := p.handleRecorded(ir)
 	if err != nil {
 		t.Fatalf("handleRecorded failed: %v", err)
 	}
@@ -132,11 +142,15 @@ func TestHandleRecorded_FixtureMiss(t *testing.T) {
 	}
 
 	p := &Proxy{Mode: ModeRecorded, Store: store}
-	norm := &stubNormalizer{}
-	canonical := &providers.CanonicalRequest{ProviderFamily: "test", Model: "test-model"}
-	canonicalBytes := []byte(`{"model":"test-model","messages":[]}`)
+	ir := &interceptedRequest{
+		Normalizer:     &stubNormalizer{},
+		Canonical:      &providers.CanonicalRequest{ProviderFamily: "test", Model: "test-model"},
+		CanonicalBytes: []byte(`{"model":"test-model","messages":[]}`),
+		Hash:           "nonexistent-hash",
+		Start:          time.Now(),
+	}
 
-	_, _, err := p.handleRecorded(norm, canonical, canonicalBytes, "nonexistent-hash", time.Now())
+	_, _, err := p.handleRecorded(ir)
 	if err == nil {
 		t.Fatal("expected fixture miss error, got nil")
 	}
