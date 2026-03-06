@@ -19,63 +19,12 @@ import (
 
 	"github.com/pmclSF/gauntlet/internal/assertions"
 	"github.com/pmclSF/gauntlet/internal/baseline"
-	"github.com/pmclSF/gauntlet/internal/determinism"
 	"github.com/pmclSF/gauntlet/internal/docket"
 	"github.com/pmclSF/gauntlet/internal/output"
 	"github.com/pmclSF/gauntlet/internal/scenario"
 	"github.com/pmclSF/gauntlet/internal/tut"
 	"github.com/pmclSF/gauntlet/internal/world"
 )
-
-// Config holds runner configuration from gauntlet.yml and CLI flags.
-type Config struct {
-	Suite            string
-	ConfigPath       string
-	Mode             string // pr_ci, nightly, local
-	OutputDir        string
-	EvalsDir         string
-	SuiteDir         string
-	ToolsDir         string
-	DBDir            string
-	BaselineDir      string
-	FixturesDir      string
-	TUTConfig        tut.Config
-	DryRun           bool
-	BudgetMs         int64
-	ScenarioBudgetMs int64
-	FailFast         bool
-	MaxArtifactBytes int64
-	ScenarioFilter   string
-	HardGates        map[string]bool
-	SoftSignals      map[string]bool
-}
-
-// Runner is the main Gauntlet test runner.
-type Runner struct {
-	Config  Config
-	Adapter tut.Adapter
-	Harness *determinism.Harness
-}
-
-type scenarioExecution struct {
-	Result    output.ScenarioResult
-	Input     scenario.Input
-	WorldSpec scenario.WorldSpec
-	ToolTrace []tut.TraceEvent
-	Baseline  interface{}
-	PROutput  *tut.AgentOutput
-}
-
-// NewRunner creates a new Runner with the given configuration.
-func NewRunner(cfg Config) *Runner {
-	if cfg.MaxArtifactBytes <= 0 {
-		cfg.MaxArtifactBytes = output.DefaultMaxArtifactBytes
-	}
-	return &Runner{
-		Config:  cfg,
-		Harness: determinism.NewHarness(),
-	}
-}
 
 // Run executes all scenarios in the suite and produces output artifacts.
 func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
@@ -495,25 +444,6 @@ func (r *Runner) runEgressSelfTest() (EgressStatus, error) {
 	return status, nil
 }
 
-func enforceAssertionMode(results []assertions.Result, hardGates, softSignals map[string]bool) []assertions.Result {
-	if len(hardGates) == 0 && len(softSignals) == 0 {
-		return results
-	}
-	for i := range results {
-		name := strings.TrimSpace(results[i].AssertionType)
-		if name == "" {
-			continue
-		}
-		if softSignals[name] {
-			results[i].Soft = true
-			continue
-		}
-		if hardGates[name] {
-			results[i].Soft = false
-		}
-	}
-	return results
-}
 
 func detectFirstClassDocketTag(results []assertions.Result, toolTrace []tut.TraceEvent) string {
 	for _, result := range results {
@@ -833,78 +763,6 @@ func getRequiredFields(bl *baseline.Contract) []string {
 	return nil
 }
 
-func (r *Runner) buildTUTConfig(requiresBlockedEgress bool) tut.Config {
-	cfg := r.Config.TUTConfig
-	cfg.Env = cloneStringMap(cfg.Env)
-	if r.Config.Mode == "fork_pr" || r.Config.Mode == "pr_ci" {
-		cfg.RestrictHostEnv = true
-		cfg.Env = stripSensitiveEnv(cfg.Env)
-	}
-	for _, kv := range r.Harness.Env() {
-		if k, v, ok := splitEnvVar(kv); ok {
-			cfg.Env[k] = v
-		}
-	}
-	cfg.BlockNetworkEgress = requiresBlockedEgress
-	return cfg
-}
-
-func stripSensitiveEnv(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return in
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		if isSensitiveEnvKey(k) {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-func isSensitiveEnvKey(key string) bool {
-	k := strings.ToUpper(strings.TrimSpace(key))
-	if k == "" {
-		return false
-	}
-	known := map[string]bool{
-		"OPENAI_API_KEY":                 true,
-		"ANTHROPIC_API_KEY":              true,
-		"GOOGLE_API_KEY":                 true,
-		"GOOGLE_APPLICATION_CREDENTIALS": true,
-		"AWS_ACCESS_KEY_ID":              true,
-		"AWS_SECRET_ACCESS_KEY":          true,
-		"AWS_SESSION_TOKEN":              true,
-		"COHERE_API_KEY":                 true,
-	}
-	if known[k] {
-		return true
-	}
-	if strings.Contains(k, "API_KEY") ||
-		strings.Contains(k, "SECRET") ||
-		strings.Contains(k, "TOKEN") ||
-		strings.Contains(k, "PASSWORD") {
-		return true
-	}
-	return false
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func splitEnvVar(kv string) (string, string, bool) {
-	parts := strings.SplitN(kv, "=", 2)
-	if len(parts) != 2 || parts[0] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
 
 func prepareScenarioDatabases(ws *world.State, s *scenario.Scenario) (map[string]string, func(), error) {
 	if len(s.World.Databases) == 0 {
@@ -965,6 +823,3 @@ func getCommit() string {
 	return strings.TrimSpace(string(out))
 }
 
-func modeRequiresBlockedEgress(mode string) bool {
-	return mode == "pr_ci" || mode == "fork_pr"
-}
