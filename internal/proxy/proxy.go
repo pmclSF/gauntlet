@@ -25,6 +25,18 @@ const (
 	ModePassthrough Mode = "passthrough"
 )
 
+// UnknownTrafficPolicy controls how the proxy handles requests that do not
+// match any known provider normalizer.
+type UnknownTrafficPolicy string
+
+const (
+	// UnknownTrafficPassthrough forwards unknown traffic transparently.
+	// This is the default for backward compatibility.
+	UnknownTrafficPassthrough UnknownTrafficPolicy = "passthrough"
+	// UnknownTrafficReject returns an error for unknown traffic.
+	UnknownTrafficReject UnknownTrafficPolicy = "reject"
+)
+
 const (
 	defaultMaxHeaderBytes           = 64 * 1024
 	defaultMaxBodyBytes       int64 = 2 * 1024 * 1024
@@ -37,17 +49,19 @@ var defaultTransport = newUpstreamTransport()
 
 // Proxy is the local MITM HTTP/HTTPS proxy.
 type Proxy struct {
-	Addr               string
-	Mode               Mode
-	Store              *fixture.Store
-	Suite              string
-	ScenarioSetSHA256  string
-	MaxHeaderBytes     int
-	MaxBodyBytes       int64
-	MaxRequestsPerConn int
-	Normalizers        []providers.ProviderNormalizer
-	CA                 *CA
-	Redactor           *redaction.Redactor
+	Addr                 string
+	Mode                 Mode
+	UnknownTraffic       UnknownTrafficPolicy
+	EnvPolicy            ProxyEnvPolicy
+	Store                *fixture.Store
+	Suite                string
+	ScenarioSetSHA256    string
+	MaxHeaderBytes       int
+	MaxBodyBytes         int64
+	MaxRequestsPerConn   int
+	Normalizers          []providers.ProviderNormalizer
+	CA                   *CA
+	Redactor             *redaction.Redactor
 
 	server   *http.Server
 	mu       sync.Mutex
