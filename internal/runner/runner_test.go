@@ -1236,6 +1236,48 @@ func TestRunnerRun_NonPythonMissingDeterminismReportWarns(t *testing.T) {
 	}
 }
 
+func TestRunnerRun_ArtifactWriteErrorSurfaced(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: fails\ninput:\n  messages:\n    - role: user\n      content: hello\nassertions:\n  - type: tool_sequence\n    required: [missing_tool]\n")
+	// Create a read-only output dir so artifact writes fail
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir output dir: %v", err)
+	}
+	// Write results.json and summary.md will succeed, but the scenario artifact
+	// directory creation will fail because we make the scenario subdir a file
+	scenarioBlocker := filepath.Join(outputDir, "fails")
+	if err := os.WriteFile(scenarioBlocker, []byte("blocker"), 0o444); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: outputDir,
+		Mode:      "local",
+		DryRun:    true,
+		BudgetMs:  10000,
+	})
+
+	result, err := r.Run(t.Context())
+	if err == nil {
+		t.Fatal("expected artifact write error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to write artifact bundles") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), `scenario "fails"`) {
+		t.Fatalf("error should name the scenario: %v", err)
+	}
+	// Result should still be returned even when artifact writes fail
+	if result == nil {
+		t.Fatal("expected non-nil result even on artifact write error")
+	}
+	if result.Summary.Failed != 1 {
+		t.Fatalf("failed summary = %d, want 1", result.Summary.Failed)
+	}
+}
+
 func writeSingleScenarioSuite(t *testing.T, suite, scenarioYAML string) string {
 	t.Helper()
 	evalsDir := t.TempDir()
