@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pmclSF/gauntlet/internal/ci"
+	"github.com/pmclSF/gauntlet/internal/runner"
 )
 
 func newInitCmd() *cobra.Command {
@@ -23,10 +24,17 @@ func newInitCmd() *cobra.Command {
 			reader := bufio.NewReader(cmd.InOrStdin())
 			out := cmd.OutOrStdout()
 
+			// Use detection as defaults instead of hardcoded values
+			detectedFramework := ci.DetectFramework(cwd)
+			detectedEntrypoint := ci.DetectEntryPoint(cwd)
+
 			defaultFramework := "OpenAI SDK"
 			defaultScenarioDir := "evals/"
 			defaultCI := "GitHub Actions"
-			defaultEntrypoint := "agent.py"
+			defaultEntrypoint := detectedEntrypoint
+			if defaultEntrypoint == "" {
+				defaultEntrypoint = "agent.py"
+			}
 
 			framework := defaultFramework
 			scenarioDir := defaultScenarioDir
@@ -35,7 +43,11 @@ func newInitCmd() *cobra.Command {
 
 			if isInteractiveInput(cmd.InOrStdin()) {
 				fmt.Fprintln(out, "What framework does your agent use?")
-				value, err := promptChoice(reader, out, []string{"OpenAI SDK", "Anthropic SDK", "LangChain", "Other (HTTP endpoint)"}, 0)
+				defaultIdx := 0
+				if detectedFramework != "generic" {
+					fmt.Fprintf(out, "  (detected: %s)\n", detectedFramework)
+				}
+				value, err := promptChoice(reader, out, []string{"OpenAI SDK", "Anthropic SDK", "LangChain", "Other (HTTP endpoint)"}, defaultIdx)
 				if err != nil {
 					return err
 				}
@@ -86,8 +98,18 @@ func newInitCmd() *cobra.Command {
 				fmt.Fprintf(out, "✓ Created %s (GitHub template; adapt for %s)\n", result.WorkflowPath, ciSystem)
 			}
 			fmt.Fprintf(out, "✓ Added gauntlet.connect() to %s (line %d)\n", entrypoint, lineNumber)
-			fmt.Fprintf(out, "\nFramework: %s\n", framework)
-			fmt.Fprintln(out, "Next: run `gauntlet record --suite smoke` to capture your first fixtures.")
+			fmt.Fprintf(out, "\nFramework: %s (detected: %s)\n", framework, detectedFramework)
+
+			// Run auto-discovery to generate initial scenarios
+			autoResult, autoErr := ensureAutoDiscoverySuite(runner.Config{
+				Suite:    "smoke",
+				EvalsDir: filepath.Join(cwd, strings.TrimSpace(scenarioDir)),
+			}, false)
+			if autoErr == nil && autoResult != nil && autoResult.GeneratedScenarios > 0 {
+				fmt.Fprintf(out, "✓ Auto-discovered %d scenarios\n", autoResult.GeneratedScenarios)
+			}
+
+			ci.PrintOnboardingChecklist(result.Framework)
 			return nil
 		},
 	}
@@ -158,7 +180,7 @@ func writeInitScenarioFile(projectDir, scenarioDir string) (string, error) {
 		return "", fmt.Errorf("failed to create scenario directory %s: %w", smokeDir, err)
 	}
 	path := filepath.Join(smokeDir, "example_scenario.yaml")
-	content := scenarioSchemaDirective + `
+	content := "# gauntlet:auto-generated\n" + scenarioSchemaDirective + `
 scenario: example_scenario
 description: Generated starter scenario
 
@@ -180,8 +202,8 @@ assertions:
 
 func ensureConnectHook(entrypointPath string) (int, error) {
 	data, err := os.ReadFile(entrypointPath)
-	if err != nil && !os.IsNotExist(err) {
-		return 0, fmt.Errorf("failed to read entrypoint %s: %w", entrypointPath, err)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read entrypoint %s: %w\n  Create the file first or specify a different entrypoint", entrypointPath, err)
 	}
 
 	content := string(data)
@@ -195,13 +217,20 @@ func ensureConnectHook(entrypointPath string) (int, error) {
 		return 1, nil
 	}
 
-	lines := []string{}
-	if content != "" {
-		lines = strings.Split(content, "\n")
-	}
+	lines := strings.Split(content, "\n")
 	insertAt := 0
+	// Skip shebang line
 	if len(lines) > 0 && strings.HasPrefix(lines[0], "#!") {
 		insertAt = 1
+	}
+	// Skip __future__ imports (must be first real imports in Python)
+	for insertAt < len(lines) {
+		trimmed := strings.TrimSpace(lines[insertAt])
+		if strings.HasPrefix(trimmed, "from __future__") {
+			insertAt++
+			continue
+		}
+		break
 	}
 	prefix := []string{"import gauntlet_sdk as gauntlet", "gauntlet.connect()", ""}
 	newLines := make([]string, 0, len(lines)+len(prefix))
@@ -209,9 +238,6 @@ func ensureConnectHook(entrypointPath string) (int, error) {
 	newLines = append(newLines, prefix...)
 	newLines = append(newLines, lines[insertAt:]...)
 	newContent := strings.Join(newLines, "\n")
-	if strings.TrimSpace(newContent) == "" {
-		newContent = "import gauntlet_sdk as gauntlet\ngauntlet.connect()\n"
-	}
 	if err := os.WriteFile(entrypointPath, []byte(newContent), 0o644); err != nil {
 		return 0, fmt.Errorf("failed to update entrypoint %s: %w", entrypointPath, err)
 	}

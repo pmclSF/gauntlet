@@ -289,6 +289,15 @@ func splitKV(raw string) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
+// scenarioDigestPayload contains only the fields that affect fixture replay.
+// Changes to description, tags, or other metadata do not invalidate the digest.
+type scenarioDigestPayload struct {
+	Name       string                   `json:"scenario"`
+	Input      scenario.Input           `json:"input"`
+	World      scenario.WorldSpec       `json:"world"`
+	Assertions []scenario.AssertionSpec `json:"assertions"`
+}
+
 func computeScenarioSetDigest(suiteDir string) string {
 	suiteDir = strings.TrimSpace(suiteDir)
 	if suiteDir == "" {
@@ -300,7 +309,13 @@ func computeScenarioSetDigest(suiteDir string) string {
 	}
 	entries := make([]string, 0, len(scenarios))
 	for _, s := range scenarios {
-		payload, marshalErr := json.Marshal(s)
+		dp := scenarioDigestPayload{
+			Name:       s.Name,
+			Input:      s.Input,
+			World:      s.World,
+			Assertions: s.Assertions,
+		}
+		payload, marshalErr := json.Marshal(dp)
 		if marshalErr != nil {
 			return ""
 		}
