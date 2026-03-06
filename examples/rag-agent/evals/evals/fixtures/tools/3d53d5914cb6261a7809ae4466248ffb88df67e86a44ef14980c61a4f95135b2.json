@@ -1,0 +1,35 @@
+{
+  "args": {
+    "query": "empty topic for retrieval",
+    "top_k": 2
+  },
+  "args_hash": "3d53d5914cb6261a7809ae4466248ffb88df67e86a44ef14980c61a4f95135b2",
+  "canonical_hash": "3d53d5914cb6261a7809ae4466248ffb88df67e86a44ef14980c61a4f95135b2",
+  "canonical_request": {
+    "args": {
+      "query": "empty topic for retrieval",
+      "top_k": 2
+    },
+    "tool": "retrieve_documents"
+  },
+  "fixture_id": "3d53d5914cb6261a7809ae4466248ffb88df67e86a44ef14980c61a4f95135b2",
+  "hash_version": 1,
+  "provenance": {
+    "commit_sha": "unknown",
+    "recorder_identity": "pzachary",
+    "sdk_versions": {
+      "gauntlet_python_sdk": "0.1.0"
+    },
+    "source": "sdk_tool_live",
+    "toolchain_versions": {
+      "python": "3.9.6"
+    }
+  },
+  "recorded_at": "2026-03-06T06:10:14.439554Z",
+  "response": {
+    "documents": []
+  },
+  "scenario_set_sha256": "5bc16fc3fac10ab1f72c4c85678997cdd1ebe1e8ea807bfa180920af47532142",
+  "suite": "smoke",
+  "tool_name": "retrieve_documents"
+}

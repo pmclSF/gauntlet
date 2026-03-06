@@ -453,6 +453,34 @@ class TestToolDecorator:
         assert saved["canonical_hash"] == fixture_hash
         assert saved["response"] == {"order_id": "ord-atomic", "status": "ok"}
 
+    def test_tool_exception_passthrough_preserves_original_exception_sync(self):
+        os.environ["GAUNTLET_MODEL_MODE"] = "passthrough"
+
+        @gauntlet.tool(name="sync_error_tool")
+        def sync_error_tool() -> None:
+            raise ValueError("sync boom")
+
+        with pytest.raises(ValueError, match="sync boom") as exc_info:
+            sync_error_tool()
+
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+        assert exc_info.traceback[-1].name == "sync_error_tool"
+
+    def test_tool_exception_passthrough_preserves_original_exception_async(self):
+        os.environ["GAUNTLET_MODEL_MODE"] = "passthrough"
+
+        @gauntlet.tool(name="async_error_tool")
+        async def async_error_tool() -> None:
+            raise RuntimeError("async boom")
+
+        with pytest.raises(RuntimeError, match="async boom") as exc_info:
+            asyncio.run(async_error_tool())
+
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
+        assert exc_info.traceback[-1].name == "async_error_tool"
+
 
 class TestToolDecoratorCanonicalDenylist:
     """Test denylist canonicalization in the tool decorator."""

@@ -1,0 +1,35 @@
+{
+  "args": {
+    "attempt": 2,
+    "plan_id": "plan-001"
+  },
+  "args_hash": "9a6ed18e0c944182fdec20fe97718bcf2c0939d72b73dc632e337ab9e7b3efe7",
+  "canonical_hash": "9a6ed18e0c944182fdec20fe97718bcf2c0939d72b73dc632e337ab9e7b3efe7",
+  "canonical_request": {
+    "args": {
+      "attempt": 2,
+      "plan_id": "plan-001"
+    },
+    "tool": "fetch_context"
+  },
+  "fixture_id": "9a6ed18e0c944182fdec20fe97718bcf2c0939d72b73dc632e337ab9e7b3efe7",
+  "hash_version": 1,
+  "provenance": {
+    "commit_sha": "unknown",
+    "recorder_identity": "pzachary",
+    "sdk_versions": {
+      "gauntlet_python_sdk": "0.1.0"
+    },
+    "source": "sdk_tool_live",
+    "toolchain_versions": {
+      "python": "3.9.6"
+    }
+  },
+  "recorded_at": "2026-03-06T06:10:28.937944Z",
+  "response": {
+    "context": "context-for-plan-001"
+  },
+  "scenario_set_sha256": "bdd788537a31d714f868cf04888bbe9ca9cacfec39cacf6900ddd96ce398e417",
+  "suite": "smoke",
+  "tool_name": "fetch_context"
+}

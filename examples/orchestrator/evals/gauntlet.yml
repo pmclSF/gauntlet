@@ -1,0 +1,18 @@
+version: 1
+suite: smoke
+description: Smoke suite for multi-tool orchestration
+
+tut:
+  type: cli
+  command: "python3 -m agent.main"
+  working_dir: "."
+
+defaults:
+  budget_ms: 30000
+  runner_mode: local
+  model_mode: live
+
+scenarios_dir: evals/smoke
+world_dir: evals/world
+fixtures_dir: evals/fixtures
+baselines_dir: evals/baselines/smoke

@@ -433,11 +433,17 @@ def tool(name: Optional[str] = None, **kwargs: Any) -> Callable[[Any], Any]:
                     _intercept(tool_name, unwrapped, args, call_kwargs)
                 )
                 if mode == "passthrough":
-                    return await unwrapped(*args, **call_kwargs)
+                    try:
+                        return await unwrapped(*args, **call_kwargs)
+                    except Exception:
+                        raise
                 if mode == "recorded":
                     return result
                 # live mode
-                result = await unwrapped(*args, **call_kwargs)
+                try:
+                    result = await unwrapped(*args, **call_kwargs)
+                except Exception:
+                    raise
                 if (
                     args_dict is None
                     or canonical_hash is None
@@ -456,11 +462,17 @@ def tool(name: Optional[str] = None, **kwargs: Any) -> Callable[[Any], Any]:
                     _intercept(tool_name, unwrapped, args, call_kwargs)
                 )
                 if mode == "passthrough":
-                    return unwrapped(*args, **call_kwargs)
+                    try:
+                        return unwrapped(*args, **call_kwargs)
+                    except Exception:
+                        raise
                 if mode == "recorded":
                     return result
                 # live mode
-                result = unwrapped(*args, **call_kwargs)
+                try:
+                    result = unwrapped(*args, **call_kwargs)
+                except Exception:
+                    raise
                 if (
                     args_dict is None
                     or canonical_hash is None

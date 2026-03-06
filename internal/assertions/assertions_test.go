@@ -21,6 +21,7 @@ func TestRegistryContainsAllEightTypes(t *testing.T) {
 		"retry_cap",
 		"token_budget",
 		"forbidden_tool",
+		"forbidden_content",
 		"output_derivable",
 		"sensitive_leak",
 	}
@@ -62,6 +63,7 @@ func TestIsSoftValues(t *testing.T) {
 		"retry_cap",
 		"token_budget",
 		"forbidden_tool",
+		"forbidden_content",
 	}
 	for _, name := range hardTypes {
 		a, ok := Get(name)

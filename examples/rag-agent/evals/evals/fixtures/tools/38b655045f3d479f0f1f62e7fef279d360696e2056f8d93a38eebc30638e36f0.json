@@ -1,0 +1,46 @@
+{
+  "args": {
+    "query": "What is your shipping SLA?",
+    "top_k": 2
+  },
+  "args_hash": "38b655045f3d479f0f1f62e7fef279d360696e2056f8d93a38eebc30638e36f0",
+  "canonical_hash": "38b655045f3d479f0f1f62e7fef279d360696e2056f8d93a38eebc30638e36f0",
+  "canonical_request": {
+    "args": {
+      "query": "What is your shipping SLA?",
+      "top_k": 2
+    },
+    "tool": "retrieve_documents"
+  },
+  "fixture_id": "38b655045f3d479f0f1f62e7fef279d360696e2056f8d93a38eebc30638e36f0",
+  "hash_version": 1,
+  "provenance": {
+    "commit_sha": "unknown",
+    "recorder_identity": "pzachary",
+    "sdk_versions": {
+      "gauntlet_python_sdk": "0.1.0"
+    },
+    "source": "sdk_tool_live",
+    "toolchain_versions": {
+      "python": "3.9.6"
+    }
+  },
+  "recorded_at": "2026-03-06T06:10:16.684654Z",
+  "response": {
+    "documents": [
+      {
+        "id": "doc-101",
+        "snippet": "Orders ship within 2 business days.",
+        "title": "Shipping SLA"
+      },
+      {
+        "id": "doc-205",
+        "snippet": "Returns accepted within 30 days.",
+        "title": "Returns Policy"
+      }
+    ]
+  },
+  "scenario_set_sha256": "5bc16fc3fac10ab1f72c4c85678997cdd1ebe1e8ea807bfa180920af47532142",
+  "suite": "smoke",
+  "tool_name": "retrieve_documents"
+}

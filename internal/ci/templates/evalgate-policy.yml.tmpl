@@ -13,7 +13,8 @@ suites:
     mode: nightly
 
 runner:
-  fail_fast: false   # set true to stop on first failure
+  fail_fast: false           # set true to stop on first failure
+  max_artifact_bytes: 10485760  # 10MB per-scenario artifact cap (tool trace truncates first)
 
 assertions:
   hard_gates:

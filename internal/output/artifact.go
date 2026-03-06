@@ -4,15 +4,22 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/pmclSF/gauntlet/internal/assertions"
 	"github.com/pmclSF/gauntlet/internal/determinism"
 	"github.com/pmclSF/gauntlet/internal/redaction"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 	"github.com/pmclSF/gauntlet/internal/tut"
 )
+
+// DefaultMaxArtifactBytes is the default upper bound for an artifact bundle.
+const DefaultMaxArtifactBytes int64 = 10 * 1024 * 1024
 
 type outputSnapshot struct {
 	RawOutput       string          `json:"raw_output,omitempty"`
@@ -22,9 +29,19 @@ type outputSnapshot struct {
 
 // WriteArtifactBundle writes a per-failure artifact bundle for a scenario.
 func WriteArtifactBundle(runDir, scenarioName string, sr ScenarioResult, input, worldState, toolTrace, baselineOutput, prOutput interface{}) error {
+	return WriteArtifactBundleWithLimit(runDir, scenarioName, sr, input, worldState, toolTrace, baselineOutput, prOutput, DefaultMaxArtifactBytes)
+}
+
+// WriteArtifactBundleWithLimit writes a per-failure artifact bundle for a scenario with a
+// maximum artifact size cap. If the bundle would exceed maxArtifactBytes, tool trace data
+// is truncated and a warning is emitted.
+func WriteArtifactBundleWithLimit(runDir, scenarioName string, sr ScenarioResult, input, worldState, toolTrace, baselineOutput, prOutput interface{}, maxArtifactBytes int64) error {
 	dir := filepath.Join(runDir, scenarioName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
+	}
+	if maxArtifactBytes <= 0 {
+		maxArtifactBytes = DefaultMaxArtifactBytes
 	}
 	redactor := redaction.DefaultRedactor()
 	baselineSnapshot, err := normalizeOutputSnapshot(baselineOutput)
@@ -49,6 +66,48 @@ func WriteArtifactBundle(runDir, scenarioName string, sr ScenarioResult, input, 
 		files["culprit.json"] = sr.Culprit
 	}
 
+	// Write summary.md
+	summaryMd := redactor.RedactString(generateScenarioSummary(sr, worldState, baselineSnapshot, prSnapshot))
+	summaryPath := filepath.Join(dir, "summary.md")
+	summaryBytes := []byte(summaryMd)
+	prepared, totalBytes, err := prepareArtifactFiles(files, redactor)
+	if err != nil {
+		return err
+	}
+	totalBytes += int64(len(summaryBytes))
+	if totalBytes > maxArtifactBytes {
+		originalBytes := totalBytes
+		truncatedFiles, truncatedTotal, truncated, omitted := truncateToolTraceForBudget(files, redactor, summaryBytes, maxArtifactBytes)
+		if truncated {
+			prepared = truncatedFiles
+			totalBytes = truncatedTotal
+			log.Printf("warning: artifact for scenario %q exceeded %d bytes (%d bytes); truncated tool_trace with marker [truncated — %d additional tool calls omitted] (new size: %d bytes)", scenarioName, maxArtifactBytes, originalBytes, omitted, totalBytes)
+		} else {
+			log.Printf("warning: artifact for scenario %q exceeded %d bytes (%d bytes) and could not be truncated via tool_trace", scenarioName, maxArtifactBytes, originalBytes)
+		}
+	}
+
+	fileNames := make([]string, 0, len(prepared))
+	for name := range prepared {
+		fileNames = append(fileNames, name)
+	}
+	sort.Strings(fileNames)
+	for _, name := range fileNames {
+		path := filepath.Join(dir, name)
+		if err := atomicWrite(path, prepared[name], 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", name, err)
+		}
+	}
+	if err := atomicWrite(summaryPath, summaryBytes, 0o644); err != nil {
+		return fmt.Errorf("failed to write summary.md: %w", err)
+	}
+
+	return nil
+}
+
+func prepareArtifactFiles(files map[string]interface{}, redactor *redaction.Redactor) (map[string][]byte, int64, error) {
+	prepared := make(map[string][]byte, len(files))
+	var totalBytes int64
 	fileNames := make([]string, 0, len(files))
 	for name := range files {
 		fileNames = append(fileNames, name)
@@ -61,26 +120,92 @@ func WriteArtifactBundle(runDir, scenarioName string, sr ScenarioResult, input, 
 		}
 		jsonData, err := json.MarshalIndent(data, "", "  ")
 		if err != nil {
-			return fmt.Errorf("failed to marshal %s: %w", name, err)
+			return nil, 0, fmt.Errorf("failed to marshal %s: %w", name, err)
 		}
 		redacted, err := redactor.RedactJSON(jsonData)
 		if err != nil {
-			return fmt.Errorf("failed to redact %s: %w", name, err)
+			return nil, 0, fmt.Errorf("failed to redact %s: %w", name, err)
 		}
-		path := filepath.Join(dir, name)
-		if err := atomicWrite(path, redacted, 0o644); err != nil {
-			return fmt.Errorf("failed to write %s: %w", name, err)
+		prepared[name] = redacted
+		totalBytes += int64(len(redacted))
+	}
+	return prepared, totalBytes, nil
+}
+
+func truncateToolTraceForBudget(files map[string]interface{}, redactor *redaction.Redactor, summaryBytes []byte, maxArtifactBytes int64) (map[string][]byte, int64, bool, int) {
+	rawToolTrace, ok := files["tool_trace.json"]
+	if !ok || rawToolTrace == nil {
+		prepared, total, err := prepareArtifactFiles(files, redactor)
+		if err != nil {
+			return nil, 0, false, 0
 		}
+		return prepared, total + int64(len(summaryBytes)), false, 0
 	}
 
-	// Write summary.md
-	summaryMd := redactor.RedactString(generateScenarioSummary(sr))
-	summaryPath := filepath.Join(dir, "summary.md")
-	if err := atomicWrite(summaryPath, []byte(summaryMd), 0o644); err != nil {
-		return fmt.Errorf("failed to write summary.md: %w", err)
+	items, ok := asInterfaceSlice(rawToolTrace)
+	if !ok || len(items) == 0 {
+		prepared, total, err := prepareArtifactFiles(files, redactor)
+		if err != nil {
+			return nil, 0, false, 0
+		}
+		return prepared, total + int64(len(summaryBytes)), false, 0
 	}
 
-	return nil
+	bestPrepared := map[string][]byte{}
+	var bestTotal int64
+	bestFound := false
+	bestOmitted := 0
+
+	for keep := len(items); keep >= 0; keep-- {
+		omitted := len(items) - keep
+		candidate := make([]interface{}, 0, keep+1)
+		candidate = append(candidate, items[:keep]...)
+		if omitted > 0 {
+			candidate = append(candidate, map[string]interface{}{
+				"truncated": fmt.Sprintf("[truncated — %d additional tool calls omitted]", omitted),
+			})
+		}
+
+		candidateFiles := cloneMap(files)
+		candidateFiles["tool_trace.json"] = candidate
+
+		prepared, total, err := prepareArtifactFiles(candidateFiles, redactor)
+		if err != nil {
+			continue
+		}
+		totalWithSummary := total + int64(len(summaryBytes))
+		bestPrepared = prepared
+		bestTotal = totalWithSummary
+		bestOmitted = omitted
+		if totalWithSummary <= maxArtifactBytes {
+			bestFound = true
+			break
+		}
+	}
+	if len(bestPrepared) == 0 {
+		return nil, 0, false, 0
+	}
+	return bestPrepared, bestTotal, bestFound || bestOmitted > 0, bestOmitted
+}
+
+func asInterfaceSlice(value interface{}) ([]interface{}, bool) {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.Kind() != reflect.Slice {
+		return nil, false
+	}
+	out := make([]interface{}, 0, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out = append(out, rv.Index(i).Interface())
+	}
+	return out, true
+}
+
+func cloneMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func normalizeOutputSnapshot(output interface{}) (*outputSnapshot, error) {
@@ -171,25 +296,128 @@ func snapshotFromRawBytes(raw []byte) (*outputSnapshot, error) {
 	}, nil
 }
 
-func generateScenarioSummary(sr ScenarioResult) string {
-	s := fmt.Sprintf("# %s\n\n**Status:** %s\n", sr.Name, sr.Status)
+func generateScenarioSummary(sr ScenarioResult, worldState interface{}, baseline, pr *outputSnapshot) string {
+	statusWord := "FAILED"
+	if strings.EqualFold(sr.Status, "error") {
+		statusWord = "ERROR"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%s  %s\n\n", statusWord, sr.Name))
+
 	if sr.Culprit != nil {
-		s += fmt.Sprintf("**Culprit:** %s (%s confidence)\n", sr.Culprit.Class, sr.Culprit.Confidence)
-		if sr.Culprit.Reasoning != "" {
-			s += fmt.Sprintf("**Reasoning:** %s\n", sr.Culprit.Reasoning)
+		b.WriteString(fmt.Sprintf("Culprit: %s\n", sr.Culprit.Class))
+		b.WriteString(fmt.Sprintf("Confidence: %s\n\n", sr.Culprit.Confidence))
+	}
+
+	if failing := firstFailingAssertion(sr.Assertions); failing != nil {
+		b.WriteString("Failing assertion:\n")
+		b.WriteString(fmt.Sprintf("  %s\n", failing.AssertionType))
+		if strings.TrimSpace(failing.Expected) != "" {
+			b.WriteString(fmt.Sprintf("  Expected: %s\n", failing.Expected))
 		}
+		if strings.TrimSpace(failing.Actual) != "" {
+			b.WriteString(fmt.Sprintf("  Actual:   %s\n", failing.Actual))
+		}
+		if strings.TrimSpace(failing.Message) != "" {
+			b.WriteString(fmt.Sprintf("  Message:  %s\n", failing.Message))
+		}
+		b.WriteString("\n")
+	}
+
+	if formattedWorld := formatWorldStateSummary(worldState); formattedWorld != "" {
+		b.WriteString("World state:\n")
+		b.WriteString(formattedWorld)
+		b.WriteString("\n")
+	}
+
+	if baselineText := formatSnapshotLine(baseline); baselineText != "" {
+		b.WriteString(fmt.Sprintf("Baseline output: %q\n", baselineText))
+	}
+	if prText := formatSnapshotLine(pr); prText != "" {
+		b.WriteString(fmt.Sprintf("PR output:       %q\n", prText))
 	}
 	if sr.PrimaryTag != "" {
-		s += fmt.Sprintf("**Docket:** %s\n", sr.PrimaryTag)
-		s += "See docs/docket-tags.md for remediation guidance.\n"
+		b.WriteString(fmt.Sprintf("\nDocket tag: %s\n", sr.PrimaryTag))
+		b.WriteString("See docs/docket-tags.md for remediation guidance.\n")
 	}
-	s += "\n## Assertions\n\n"
-	for _, a := range sr.Assertions {
-		status := "PASS"
-		if !a.Passed {
-			status = "FAIL"
+
+	return b.String()
+}
+
+func firstFailingAssertion(results []assertions.Result) *assertions.Result {
+	for i := range results {
+		if !results[i].Passed {
+			return &results[i]
 		}
-		s += fmt.Sprintf("- [%s] %s: %s\n", status, a.AssertionType, a.Message)
 	}
-	return s
+	return nil
+}
+
+func formatWorldStateSummary(worldState interface{}) string {
+	switch ws := worldState.(type) {
+	case scenario.WorldSpec:
+		return formatScenarioWorldSpec(ws)
+	case *scenario.WorldSpec:
+		if ws == nil {
+			return ""
+		}
+		return formatScenarioWorldSpec(*ws)
+	default:
+		if worldState == nil {
+			return ""
+		}
+		raw, err := json.MarshalIndent(worldState, "", "  ")
+		if err != nil {
+			return ""
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		for i := range lines {
+			lines[i] = "  " + lines[i]
+		}
+		return strings.Join(lines, "\n")
+	}
+}
+
+func formatScenarioWorldSpec(ws scenario.WorldSpec) string {
+	var lines []string
+	if len(ws.Tools) > 0 {
+		toolNames := make([]string, 0, len(ws.Tools))
+		for name := range ws.Tools {
+			toolNames = append(toolNames, name)
+		}
+		sort.Strings(toolNames)
+		lines = append(lines, "  tools:")
+		for _, name := range toolNames {
+			lines = append(lines, fmt.Sprintf("    %s -> %s", name, ws.Tools[name]))
+		}
+	}
+	if len(ws.Databases) > 0 {
+		dbNames := make([]string, 0, len(ws.Databases))
+		for name := range ws.Databases {
+			dbNames = append(dbNames, name)
+		}
+		sort.Strings(dbNames)
+		lines = append(lines, "  databases:")
+		for _, name := range dbNames {
+			spec := ws.Databases[name]
+			seeds := append([]string{}, spec.SeedSets...)
+			sort.Strings(seeds)
+			lines = append(lines, fmt.Sprintf("    %s -> %s", name, strings.Join(seeds, ", ")))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatSnapshotLine(snapshot *outputSnapshot) string {
+	if snapshot == nil {
+		return ""
+	}
+	candidate := strings.TrimSpace(snapshot.RawOutput)
+	if candidate == "" && len(snapshot.CanonicalOutput) > 0 {
+		candidate = strings.TrimSpace(string(snapshot.CanonicalOutput))
+	}
+	if candidate == "" {
+		candidate = strings.TrimSpace(snapshot.StdErr)
+	}
+	return candidate
 }

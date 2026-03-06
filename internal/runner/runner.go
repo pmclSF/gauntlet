@@ -43,6 +43,7 @@ type Config struct {
 	BudgetMs         int64
 	ScenarioBudgetMs int64
 	FailFast         bool
+	MaxArtifactBytes int64
 	ScenarioFilter   string
 	HardGates        map[string]bool
 	SoftSignals      map[string]bool
@@ -66,6 +67,9 @@ type scenarioExecution struct {
 
 // NewRunner creates a new Runner with the given configuration.
 func NewRunner(cfg Config) *Runner {
+	if cfg.MaxArtifactBytes <= 0 {
+		cfg.MaxArtifactBytes = output.DefaultMaxArtifactBytes
+	}
 	return &Runner{
 		Config:  cfg,
 		Harness: determinism.NewHarness(),
@@ -222,7 +226,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	for _, exec := range executions {
 		sr := exec.Result
 		if sr.Status == "failed" || sr.Status == "error" {
-			_ = output.WriteArtifactBundle(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput)
+			_ = output.WriteArtifactBundleWithLimit(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput, r.Config.MaxArtifactBytes)
 		}
 	}
 

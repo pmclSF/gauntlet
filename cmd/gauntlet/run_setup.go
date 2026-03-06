@@ -48,6 +48,7 @@ func applyResolvedPolicy(cfg *runner.Config, resolved *policy.Resolved, configPa
 	cfg.BaselineDir = resolved.BaselineDir
 	cfg.FixturesDir = resolved.FixturesDir
 	cfg.FailFast = resolved.FailFast
+	cfg.MaxArtifactBytes = resolved.MaxArtifactBytes
 	cfg.HardGates = toBoolSet(resolved.AssertionMode.HardGates)
 	cfg.SoftSignals = toBoolSet(resolved.AssertionMode.SoftSignals)
 	cfg.TUTConfig = tut.Config{
