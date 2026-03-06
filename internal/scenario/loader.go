@@ -40,6 +40,7 @@ func LoadSuite(dir string) ([]*Scenario, error) {
 		return nil, fmt.Errorf("failed to read suite directory %s: %w", dir, err)
 	}
 	var scenarios []*Scenario
+	seenNames := make(map[string]string)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -48,10 +49,20 @@ func LoadSuite(dir string) ([]*Scenario, error) {
 		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
 			continue
 		}
-		s, err := LoadFile(filepath.Join(dir, name))
+		path := filepath.Join(dir, name)
+		s, err := LoadFile(path)
 		if err != nil {
 			return nil, err
 		}
+		if firstPath, exists := seenNames[s.Name]; exists {
+			return nil, fmt.Errorf(
+				"error: duplicate scenario name %q\n  first defined:  %s:1\n  also defined:   %s:1\nfix: scenario names must be unique across the suite",
+				s.Name,
+				firstPath,
+				path,
+			)
+		}
+		seenNames[s.Name] = path
 		scenarios = append(scenarios, s)
 	}
 	if len(scenarios) == 0 {

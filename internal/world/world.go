@@ -19,25 +19,55 @@ type State struct {
 
 // ToolDef is a tool with its possible states.
 type ToolDef struct {
-	Tool   string                    `yaml:"tool" json:"tool"`
-	States map[string]*ToolStateDef  `yaml:"states" json:"states"`
+	Tool   string                   `yaml:"tool" json:"tool"`
+	States map[string]*ToolStateDef `yaml:"states" json:"states"`
 }
 
 // ToolStateDef is a single tool state.
 type ToolStateDef struct {
-	Response          interface{} `yaml:"response" json:"response,omitempty"`
-	DelayMs           int         `yaml:"delay_ms" json:"delay_ms,omitempty"`
-	StatusCode        int         `yaml:"status_code" json:"status_code,omitempty"`
-	Error             string      `yaml:"error" json:"error,omitempty"`
-	Behavior          string      `yaml:"behavior" json:"behavior,omitempty"`
-	AgentExpectation  string      `yaml:"agent_expectation" json:"agent_expectation,omitempty"`
+	Response         interface{} `yaml:"response" json:"response,omitempty"`
+	DelayMs          int         `yaml:"delay_ms" json:"delay_ms,omitempty"`
+	StatusCode       int         `yaml:"response_code" json:"response_code,omitempty"`
+	Error            string      `yaml:"error" json:"error,omitempty"`
+	Behavior         string      `yaml:"behavior" json:"behavior,omitempty"`
+	AgentExpectation string      `yaml:"agent_expectation" json:"agent_expectation,omitempty"`
+}
+
+// UnmarshalYAML supports both response_code (preferred) and status_code
+// (legacy) for backward-compatible world definitions.
+func (t *ToolStateDef) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawToolStateDef struct {
+		Response         interface{} `yaml:"response"`
+		DelayMs          int         `yaml:"delay_ms"`
+		ResponseCode     int         `yaml:"response_code"`
+		StatusCodeLegacy int         `yaml:"status_code"`
+		Error            string      `yaml:"error"`
+		Behavior         string      `yaml:"behavior"`
+		AgentExpectation string      `yaml:"agent_expectation"`
+	}
+
+	var raw rawToolStateDef
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	t.Response = raw.Response
+	t.DelayMs = raw.DelayMs
+	t.StatusCode = raw.ResponseCode
+	if t.StatusCode == 0 {
+		t.StatusCode = raw.StatusCodeLegacy
+	}
+	t.Error = raw.Error
+	t.Behavior = raw.Behavior
+	t.AgentExpectation = raw.AgentExpectation
+	return nil
 }
 
 // DBDef is a database definition with seed sets.
 type DBDef struct {
-	Database string                  `yaml:"database" json:"database"`
-	Adapter  string                  `yaml:"adapter" json:"adapter"`
-	SeedSets map[string]*SeedSetDef  `yaml:"seed_sets" json:"seed_sets"`
+	Database string                 `yaml:"database" json:"database"`
+	Adapter  string                 `yaml:"adapter" json:"adapter"`
+	SeedSets map[string]*SeedSetDef `yaml:"seed_sets" json:"seed_sets"`
 }
 
 // SeedSetDef defines data to seed into an ephemeral database.

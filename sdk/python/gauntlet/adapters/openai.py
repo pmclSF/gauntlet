@@ -8,7 +8,7 @@ import inspect
 import os
 import time
 import warnings
-from typing import Any, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from gauntlet.events import emit_event
 
@@ -21,7 +21,7 @@ def _adapter_warnings_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
-def _warn_noop(reason: str):
+def _warn_noop(reason: str) -> None:
     if _adapter_warnings_enabled():
         warnings.warn(
             f"Gauntlet OpenAI adapter is running in no-op mode: {reason}",
@@ -58,7 +58,7 @@ def _extract_model(payload: Any) -> Optional[str]:
     return None
 
 
-def _extract_payload(args, kwargs):
+def _extract_payload(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
     for key in ("json", "body", "payload", "request"):
         value = kwargs.get(key)
         if value is not None:
@@ -68,7 +68,7 @@ def _extract_payload(args, kwargs):
     return None
 
 
-def _extract_endpoint(args, kwargs) -> Optional[str]:
+def _extract_endpoint(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Optional[str]:
     for key in ("path", "url", "endpoint"):
         value = kwargs.get(key)
         if isinstance(value, str) and value.strip():
@@ -90,8 +90,8 @@ def _emit_model_call(
     duration_ms: int,
     endpoint: Optional[str],
     transport: str,
-):
-    args = {}
+) -> None:
+    args: dict[str, Any] = {}
     if endpoint:
         args["endpoint"] = endpoint
     if payload is not None:
@@ -108,13 +108,15 @@ def _emit_model_call(
     )
 
 
-def _wrap_callable(callable_obj, provider_family: str, transport: str):
+def _wrap_callable(
+    callable_obj: Callable[..., Any], provider_family: str, transport: str
+) -> Callable[..., Any]:
     if getattr(callable_obj, "_gauntlet_model_instrumented", False):
         return callable_obj
 
     if inspect.iscoroutinefunction(callable_obj):
 
-        async def wrapped(*args, **kwargs):
+        async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
             start = time.time()
             payload = _extract_payload(args, kwargs)
             model = _extract_model(payload)
@@ -139,10 +141,11 @@ def _wrap_callable(callable_obj, provider_family: str, transport: str):
                     endpoint=endpoint,
                     transport=transport,
                 )
+        wrapped: Callable[..., Any] = async_wrapped
 
     else:
 
-        def wrapped(*args, **kwargs):
+        def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
             start = time.time()
             payload = _extract_payload(args, kwargs)
             model = _extract_model(payload)
@@ -167,12 +170,13 @@ def _wrap_callable(callable_obj, provider_family: str, transport: str):
                     endpoint=endpoint,
                     transport=transport,
                 )
+        wrapped = sync_wrapped
 
-    wrapped._gauntlet_model_instrumented = True
+    setattr(wrapped, "_gauntlet_model_instrumented", True)
     return wrapped
 
 
-def _instrument_method(target, attr_name: str, provider_family: str, transport: str) -> bool:
+def _instrument_method(target: Any, attr_name: str, provider_family: str, transport: str) -> bool:
     method = getattr(target, attr_name, None)
     if method is None or not callable(method):
         return False
@@ -184,7 +188,9 @@ def _instrument_method(target, attr_name: str, provider_family: str, transport: 
     return True
 
 
-def _instrument_resource_create(client, path, provider_family: str) -> bool:
+def _instrument_resource_create(
+    client: Any, path: tuple[str, ...], provider_family: str
+) -> bool:
     node = client
     for part in path[:-1]:
         node = getattr(node, part, None)
@@ -193,7 +199,7 @@ def _instrument_resource_create(client, path, provider_family: str) -> bool:
     return _instrument_method(node, path[-1], provider_family, transport="resource")
 
 
-def _instrument_client(client, provider_family: str = "openai") -> bool:
+def _instrument_client(client: Any, provider_family: str = "openai") -> bool:
     if client is None:
         return False
     if getattr(client, _INSTRUMENTED_ATTR, False):
@@ -219,7 +225,7 @@ def _instrument_client(client, provider_family: str = "openai") -> bool:
     return patched
 
 
-def _patch_client_constructor(cls, provider_family: str = "openai") -> bool:
+def _patch_client_constructor(cls: Any, provider_family: str = "openai") -> bool:
     if cls is None:
         return False
     if getattr(cls, _PATCHED_INIT_ATTR, False):
@@ -227,7 +233,7 @@ def _patch_client_constructor(cls, provider_family: str = "openai") -> bool:
 
     original_init = cls.__init__
 
-    def patched_init(self, *args, **kwargs):
+    def patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         _instrument_client(self, provider_family=provider_family)
 
@@ -239,12 +245,12 @@ def _patch_client_constructor(cls, provider_family: str = "openai") -> bool:
     return True
 
 
-def install_openai_instrumentation():
+def install_openai_instrumentation() -> dict[str, Any]:
     """Install constructor hooks so OpenAI clients are auto-instrumented."""
     if os.environ.get("GAUNTLET_ENABLED") != "1":
         return {"enabled": False, "patched": False, "reason": "gauntlet_disabled"}
     try:
-        import openai  # type: ignore
+        import openai
     except ImportError:
         _warn_noop("openai package not installed")
         return {"enabled": True, "patched": False, "reason": "openai_not_installed"}
@@ -258,14 +264,14 @@ def install_openai_instrumentation():
     return {"enabled": True, "patched": patched}
 
 
-def patch_openai_client(client=None):
+def patch_openai_client(client: Any = None) -> Any:
     """Patch an OpenAI client for transport-level tracing and metadata capture."""
     if os.environ.get("GAUNTLET_ENABLED") != "1":
         return client
 
     if client is None:
         try:
-            import openai  # type: ignore
+            import openai
 
             client = openai.OpenAI()
         except ImportError:

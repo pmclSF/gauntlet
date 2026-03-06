@@ -2,6 +2,7 @@ package assertions
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/pmclSF/gauntlet/internal/scenario"
@@ -237,6 +238,62 @@ func TestToolArgs_SkipsNonToolCallEvents(t *testing.T) {
 	result := a.Evaluate(ctx)
 	if !result.Passed {
 		t.Errorf("expected pass for non-tool_call events, got fail: %s", result.Message)
+	}
+}
+
+func TestToolArgsInvariant_FailsWhenTargetToolNotCalledByDefault(t *testing.T) {
+	a := &ToolArgsAssertion{}
+	ctx := Context{
+		Spec: map[string]interface{}{
+			"type":      "tool_args_invariant",
+			"tool":      "order_lookup",
+			"invariant": "args.order_id == input.order_id",
+		},
+		Input: scenario.Input{
+			Payload: map[string]interface{}{"order_id": "ord-1"},
+		},
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "tool_call",
+				ToolName:  "different_tool",
+				Args:      json.RawMessage(`{"order_id":"ord-1"}`),
+			},
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if result.Passed {
+		t.Fatal("expected fail when target tool is never called")
+	}
+	if got := result.Message; !strings.Contains(got, "set require_called: false") {
+		t.Fatalf("unexpected message: %s", got)
+	}
+}
+
+func TestToolArgsInvariant_AllowsMissingToolWhenRequireCalledFalse(t *testing.T) {
+	a := &ToolArgsAssertion{}
+	ctx := Context{
+		Spec: map[string]interface{}{
+			"type":           "tool_args_invariant",
+			"tool":           "order_lookup",
+			"invariant":      "args.order_id == input.order_id",
+			"require_called": false,
+		},
+		Input: scenario.Input{
+			Payload: map[string]interface{}{"order_id": "ord-1"},
+		},
+		ToolTrace: []tut.TraceEvent{
+			{
+				EventType: "tool_call",
+				ToolName:  "different_tool",
+				Args:      json.RawMessage(`{"order_id":"ord-1"}`),
+			},
+		},
+	}
+
+	result := a.Evaluate(ctx)
+	if !result.Passed {
+		t.Fatalf("expected pass with require_called=false, got fail: %s", result.Message)
 	}
 }
 

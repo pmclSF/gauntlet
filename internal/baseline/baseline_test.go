@@ -114,6 +114,47 @@ func TestCompare_NilBaseline(t *testing.T) {
 	}
 }
 
+func TestCompare_ExpectedOutput_CanonicalOrderingEquivalent(t *testing.T) {
+	bl := &Contract{
+		Output: &OutputBaseline{
+			ExpectedOutput: json.RawMessage(`{"b":{"z":1,"a":2},"a":[{"y":2,"x":1}]}`),
+		},
+	}
+	output := tut.AgentOutput{
+		Parsed: map[string]interface{}{
+			"a": []interface{}{
+				map[string]interface{}{"x": float64(1), "y": float64(2)},
+			},
+			"b": map[string]interface{}{"a": float64(2), "z": float64(1)},
+		},
+	}
+	mismatches := Compare(bl, nil, output)
+	if len(mismatches) != 0 {
+		t.Fatalf("expected canonical match with different key ordering, got mismatches: %+v", mismatches)
+	}
+}
+
+func TestCompare_ExpectedOutput_CanonicalMismatch(t *testing.T) {
+	bl := &Contract{
+		Output: &OutputBaseline{
+			ExpectedOutput: json.RawMessage(`{"status":"ok","count":2}`),
+		},
+	}
+	output := tut.AgentOutput{
+		Parsed: map[string]interface{}{
+			"status": "ok",
+			"count":  float64(3),
+		},
+	}
+	mismatches := Compare(bl, nil, output)
+	if len(mismatches) != 1 {
+		t.Fatalf("expected 1 mismatch, got %d: %+v", len(mismatches), mismatches)
+	}
+	if mismatches[0].Field != "output.expected_output" {
+		t.Fatalf("mismatch field = %q, want output.expected_output", mismatches[0].Field)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Compare — output checks
 // ---------------------------------------------------------------------------

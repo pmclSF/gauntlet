@@ -165,6 +165,12 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	if !strings.Contains(workflowText, "command -v unshare") || !strings.Contains(workflowText, "unshare --net /bin/sh -lc") {
 		t.Error("workflow should run pr_ci suite inside a network namespace for hermetic egress")
 	}
+	if !strings.Contains(workflowText, `GAUNTLET_MODE: ${{ github.event_name == 'pull_request'`) {
+		t.Error("workflow should set GAUNTLET_MODE for fork-vs-hermetic behavior")
+	}
+	if !strings.Contains(workflowText, `gauntlet run --suite smoke --mode "${GAUNTLET_MODE}"`) {
+		t.Error("workflow should pass --mode $GAUNTLET_MODE")
+	}
 	if !strings.Contains(workflowText, "gauntlet sign-artifacts --dir evals/runs") {
 		t.Error("workflow should sign artifact evidence bundle before upload")
 	}
@@ -179,6 +185,12 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	}
 	if !strings.Contains(workflowText, "name: Upload results\n        if: always()") {
 		t.Error("upload step must always run so results are available for debugging")
+	}
+	if !strings.Contains(workflowText, "name: Post PR comment") {
+		t.Error("workflow should post/update a PR comment with gauntlet results")
+	}
+	if !strings.Contains(workflowText, "retention-days: 30") {
+		t.Error("workflow upload-artifact step should set explicit artifact retention")
 	}
 	if !strings.Contains(workflowText, "gauntlet check-baseline-approval") {
 		t.Error("workflow should enforce baseline approval policy for baseline-changing PRs")
@@ -232,6 +244,9 @@ func TestEnable_GeneratesFiles(t *testing.T) {
 	policyText := string(data)
 	if !strings.Contains(policyText, `addr: "localhost:0"`) {
 		t.Error("policy template should default proxy addr to localhost:0 for concurrent runs")
+	}
+	if !strings.Contains(policyText, "runner:\n  fail_fast: false") {
+		t.Error("policy template should include runner.fail_fast default")
 	}
 }
 

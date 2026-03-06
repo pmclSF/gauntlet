@@ -2,13 +2,17 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pmclSF/gauntlet/internal/docket"
 	"github.com/pmclSF/gauntlet/internal/scenario"
 	"github.com/pmclSF/gauntlet/internal/tut"
 )
@@ -294,6 +298,306 @@ func TestRunnerRun_UsesAdapterAndStopsHandle(t *testing.T) {
 	}
 	if got := adapter.lastConfig.Env["EXISTING"]; got != "1" {
 		t.Fatalf("existing env = %q, want %q", got, "1")
+	}
+}
+
+func TestRunnerRun_NonZeroTUTExitIsErrorAndRecordedInArtifact(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", "scenario: crashes\ninput:\n  messages:\n    - role: user\n      content: hello\n")
+	outputDir := filepath.Join(t.TempDir(), "runs")
+
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:      []byte(`{"result":"partial"}`),
+				Parsed:   map[string]interface{}{"result": "partial"},
+				ExitCode: 1,
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: outputDir,
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.Scenarios) != 1 {
+		t.Fatalf("scenario count = %d, want 1", len(result.Scenarios))
+	}
+	scenarioResult := result.Scenarios[0]
+	if scenarioResult.Status == "passed" {
+		t.Fatalf("status = %q, want non-passed", scenarioResult.Status)
+	}
+	if scenarioResult.Status != "error" {
+		t.Fatalf("status = %q, want error", scenarioResult.Status)
+	}
+	found := false
+	for _, a := range scenarioResult.Assertions {
+		if a.AssertionType == "tut_exit_nonzero" {
+			found = true
+			if a.Passed {
+				t.Fatal("tut_exit_nonzero assertion should fail")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected tut_exit_nonzero assertion, got %+v", scenarioResult.Assertions)
+	}
+
+	artifactPath := filepath.Join(outputDir, "crashes", "assertions.json")
+	artifactData, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("failed to read artifact assertions: %v", err)
+	}
+	if !strings.Contains(string(artifactData), "tut_exit_nonzero") {
+		t.Fatalf("artifact missing tut_exit_nonzero assertion: %s", string(artifactData))
+	}
+}
+
+func TestDeterminismStability(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", `scenario: determinism_stability
+chaos: true
+input:
+  messages:
+    - role: user
+      content: hello
+world:
+  tools:
+    zeta_tool: timeout
+    alpha_tool: server_error
+assertions:
+  - type: tool_sequence
+    required: [required_tool]
+`)
+	toolsDir := filepath.Join(evalsDir, "world", "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("mkdir tools dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "alpha_tool.yaml"), []byte(`tool: alpha_tool
+states:
+  server_error:
+    status_code: 500
+`), 0o644); err != nil {
+		t.Fatalf("write alpha tool def: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "zeta_tool.yaml"), []byte(`tool: zeta_tool
+states:
+  timeout:
+    delay_ms: 5
+`), 0o644); err != nil {
+		t.Fatalf("write zeta tool def: %v", err)
+	}
+	baseOutputDir := t.TempDir()
+
+	var expectedHash string
+	for i := 0; i < 50; i++ {
+		outputDir := filepath.Join(baseOutputDir, fmt.Sprintf("run-%02d", i))
+		r := NewRunner(Config{
+			Suite:     "smoke",
+			EvalsDir:  evalsDir,
+			OutputDir: outputDir,
+			Mode:      "local",
+			DryRun:    true,
+			BudgetMs:  10000,
+		})
+
+		result, err := r.Run(t.Context())
+		if err != nil {
+			t.Fatalf("iteration %d: Run returned error: %v", i, err)
+		}
+		if result.Summary.Failed != 1 {
+			t.Fatalf("iteration %d: failed count = %d, want 1", i, result.Summary.Failed)
+		}
+
+		culpritPath := filepath.Join(outputDir, "determinism_stability", "culprit.json")
+		culpritData, err := os.ReadFile(culpritPath)
+		if err != nil {
+			t.Fatalf("iteration %d: read culprit artifact: %v", i, err)
+		}
+		sum := sha256.Sum256(culpritData)
+		gotHash := hex.EncodeToString(sum[:])
+		if i == 0 {
+			expectedHash = gotHash
+			continue
+		}
+		if gotHash != expectedHash {
+			t.Fatalf("iteration %d: culprit artifact hash = %s, want %s", i, gotHash, expectedHash)
+		}
+	}
+}
+
+func TestRunnerRun_FixtureMissGetsFirstClassDocketTag(t *testing.T) {
+	evalsDir := writeSingleScenarioSuite(t, "smoke", `scenario: fixture_miss_case
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: tool_sequence
+    required: [order_lookup]
+`)
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	adapter := &fakeAdapter{
+		handle: &fakeHandle{
+			output: &tut.AgentOutput{
+				Raw:    []byte(`{"response":"fallback"}`),
+				Parsed: map[string]interface{}{"response": "fallback"},
+			},
+			traces: []tut.TraceEvent{
+				{
+					EventType: "tool_error",
+					ToolName:  "order_lookup",
+					Error:     "FIXTURE MISS for tool:order_lookup",
+				},
+			},
+		},
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: outputDir,
+		Mode:      "local",
+		BudgetMs:  10000,
+		TUTConfig: tut.Config{Command: "agent"},
+	})
+	r.Adapter = adapter
+
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.Scenarios) != 1 {
+		t.Fatalf("scenario count = %d, want 1", len(result.Scenarios))
+	}
+	sr := result.Scenarios[0]
+	if sr.PrimaryTag != docket.TagFixtureMiss {
+		t.Fatalf("primary tag = %q, want %q", sr.PrimaryTag, docket.TagFixtureMiss)
+	}
+	if len(sr.DocketTags) != 1 || sr.DocketTags[0] != docket.TagFixtureMiss {
+		t.Fatalf("docket tags = %v, want [%s]", sr.DocketTags, docket.TagFixtureMiss)
+	}
+	if sr.Culprit != nil {
+		t.Fatalf("expected culprit heuristics to be skipped for first-class tag, got %+v", sr.Culprit)
+	}
+}
+
+func TestRunnerRun_InvalidWorldToolStateFailsBeforeExecution(t *testing.T) {
+	evalsDir := t.TempDir()
+	suiteDir := filepath.Join(evalsDir, "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite dir: %v", err)
+	}
+	scenarioYAML := `scenario: invalid_world_ref
+input:
+  messages:
+    - role: user
+      content: hello
+world:
+  tools:
+    order_lookup: missing_state
+`
+	if err := os.WriteFile(filepath.Join(suiteDir, "scenario.yaml"), []byte(scenarioYAML), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	toolsDir := filepath.Join(evalsDir, "world", "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("mkdir tools dir: %v", err)
+	}
+	toolDefYAML := `tool: order_lookup
+states:
+  nominal:
+    response:
+      status: ok
+  timeout:
+    delay_ms: 100
+`
+	if err := os.WriteFile(filepath.Join(toolsDir, "order_lookup.yaml"), []byte(toolDefYAML), 0o644); err != nil {
+		t.Fatalf("write tool def: %v", err)
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		DryRun:    true,
+		BudgetMs:  10000,
+	})
+	_, err := r.Run(t.Context())
+	if err == nil {
+		t.Fatal("expected world tool state validation error, got nil")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, `scenario "invalid_world_ref"`) {
+		t.Fatalf("error missing scenario name: %v", err)
+	}
+	if !strings.Contains(errMsg, `tool "order_lookup" has no state "missing_state"`) {
+		t.Fatalf("error missing tool/state details: %v", err)
+	}
+	if !strings.Contains(errMsg, "available states: nominal, timeout") {
+		t.Fatalf("error missing available states: %v", err)
+	}
+}
+
+func TestRunnerRun_FailFastStopsAfterFirstFailure(t *testing.T) {
+	evalsDir := t.TempDir()
+	suiteDir := filepath.Join(evalsDir, "smoke")
+	if err := os.MkdirAll(suiteDir, 0o755); err != nil {
+		t.Fatalf("mkdir suite dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(suiteDir, "a_fail.yaml"), []byte(`scenario: fail_first
+input:
+  messages:
+    - role: user
+      content: hello
+assertions:
+  - type: tool_sequence
+    required: [order_lookup]
+`), 0o644); err != nil {
+		t.Fatalf("write fail scenario: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(suiteDir, "b_pass.yaml"), []byte(`scenario: pass_second
+input:
+  messages:
+    - role: user
+      content: hello
+assertions: []
+`), 0o644); err != nil {
+		t.Fatalf("write pass scenario: %v", err)
+	}
+
+	r := NewRunner(Config{
+		Suite:     "smoke",
+		EvalsDir:  evalsDir,
+		OutputDir: filepath.Join(t.TempDir(), "runs"),
+		Mode:      "local",
+		DryRun:    true,
+		FailFast:  true,
+		BudgetMs:  10000,
+	})
+	result, err := r.Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(result.Scenarios) != 1 {
+		t.Fatalf("scenario count = %d, want 1 with fail_fast", len(result.Scenarios))
+	}
+	if result.Scenarios[0].Name != "fail_first" {
+		t.Fatalf("first scenario = %q, want fail_first", result.Scenarios[0].Name)
+	}
+	if result.Summary.Failed != 1 {
+		t.Fatalf("failed summary = %d, want 1", result.Summary.Failed)
 	}
 }
 

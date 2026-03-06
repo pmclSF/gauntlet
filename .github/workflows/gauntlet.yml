@@ -26,14 +26,37 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Verify install endpoint
+        run: |
+          code="$(curl -fsSLI -o /dev/null -w "%{http_code}" https://gauntlet.dev/install.sh)"
+          if [ "$code" != "200" ]; then
+            echo "gauntlet.dev/install.sh must return HTTP 200 (got $code)"
+            exit 1
+          fi
+
       - name: Build
         run: make build
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Lint
+        run: golangci-lint run
 
       - name: Test
         run: make test
 
-      - name: Install Python SDK
-        run: pip install -e sdk/python/
+      - name: Install Python SDK (dev)
+        run: pip install -e "sdk/python[dev]"
+
+      - name: Python SDK tests
+        run: pytest -q sdk/python/tests
+
+      - name: Python SDK mypy
+        run: mypy --strict sdk/python/gauntlet/
+
+      - name: Python SDK pyright
+        run: pyright sdk/python/gauntlet/
 
       - name: Integration test
         run: make test-example

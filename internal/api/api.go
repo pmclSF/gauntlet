@@ -138,7 +138,9 @@ func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.proposals)
+	if err := json.NewEncoder(w).Encode(s.proposals); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode proposals response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleApproveProposal(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +165,9 @@ func (s *Server) handleApproveProposal(w http.ResponseWriter, r *http.Request) {
 			s.proposals[i].Status = "approved"
 			s.saveProposals()
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(s.proposals[i])
+			if err := json.NewEncoder(w).Encode(s.proposals[i]); err != nil {
+				http.Error(w, fmt.Sprintf("failed to encode approved proposal response: %v", err), http.StatusInternalServerError)
+			}
 			return
 		}
 	}
@@ -193,7 +197,9 @@ func (s *Server) handleRejectProposal(w http.ResponseWriter, r *http.Request) {
 			s.proposals[i].Status = "rejected"
 			s.saveProposals()
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(s.proposals[i])
+			if err := json.NewEncoder(w).Encode(s.proposals[i]); err != nil {
+				http.Error(w, fmt.Sprintf("failed to encode rejected proposal response: %v", err), http.StatusInternalServerError)
+			}
 			return
 		}
 	}
@@ -206,7 +212,9 @@ func (s *Server) handlePairs(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.libraries)
+	if err := json.NewEncoder(w).Encode(s.libraries); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode pairs response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -214,9 +222,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(resultsDir)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if encodeErr := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "no_runs",
-		})
+		}); encodeErr != nil {
+			http.Error(w, fmt.Sprintf("failed to encode health response: %v", encodeErr), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -231,11 +241,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if latestResults != nil {
-		w.Write(latestResults)
+		if _, err := w.Write(latestResults); err != nil {
+			http.Error(w, fmt.Sprintf("failed to write health response: %v", err), http.StatusInternalServerError)
+		}
 	} else {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "no_results",
-		})
+		}); err != nil {
+			http.Error(w, fmt.Sprintf("failed to encode health response: %v", err), http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -264,7 +278,9 @@ func (s *Server) handleBaselineDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(contract)
+	if err := json.NewEncoder(w).Encode(contract); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode baseline diff response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleScenarios(w http.ResponseWriter, r *http.Request) {
@@ -277,12 +293,16 @@ func (s *Server) handleScenarios(w http.ResponseWriter, r *http.Request) {
 	scenarios, err := scenario.LoadSuite(suiteDir)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]interface{}{})
+		if encodeErr := json.NewEncoder(w).Encode([]interface{}{}); encodeErr != nil {
+			http.Error(w, fmt.Sprintf("failed to encode scenarios response: %v", encodeErr), http.StatusInternalServerError)
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(scenarios)
+	if err := json.NewEncoder(w).Encode(scenarios); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode scenarios response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleBaselines(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +315,9 @@ func (s *Server) handleBaselines(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(baselineDir)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]interface{}{})
+		if encodeErr := json.NewEncoder(w).Encode([]interface{}{}); encodeErr != nil {
+			http.Error(w, fmt.Sprintf("failed to encode baselines response: %v", encodeErr), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -314,7 +336,9 @@ func (s *Server) handleBaselines(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(baselines)
+	if err := json.NewEncoder(w).Encode(baselines); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode baselines response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +346,9 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(resultsDir)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]interface{}{})
+		if encodeErr := json.NewEncoder(w).Encode([]interface{}{}); encodeErr != nil {
+			http.Error(w, fmt.Sprintf("failed to encode runs response: %v", encodeErr), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -346,7 +372,9 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(runs)
+	if err := json.NewEncoder(w).Encode(runs); err != nil {
+		http.Error(w, fmt.Sprintf("failed to encode runs response: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) saveProposals() {

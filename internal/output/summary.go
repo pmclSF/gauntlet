@@ -2,7 +2,6 @@ package output
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 func WriteSummary(dir string, result *RunResult) error {
 	md := redaction.DefaultRedactor().RedactString(GenerateMarkdown(result))
 	path := filepath.Join(dir, "summary.md")
-	return os.WriteFile(path, []byte(md), 0o644)
+	return atomicWrite(path, []byte(md), 0o644)
 }
 
 // GenerateMarkdown produces the Markdown summary string.

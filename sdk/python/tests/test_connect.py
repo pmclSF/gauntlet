@@ -218,3 +218,54 @@ def test_connect_emits_determinism_env_report(monkeypatch):
     assert report["requested_freeze_time"] == "2025-01-15T10:00:00Z"
 
     connect_module.disconnect()
+
+
+@pytest.mark.parametrize(
+    "socket_path",
+    [
+        None,
+        "/nonexistent/gauntlet.sock",
+        "not-a-path://malformed",
+        "file://definitely-not-a-socket",
+    ],
+)
+def test_connect_socket_path_inputs_never_raise_when_disabled(monkeypatch, tmp_path, socket_path):
+    monkeypatch.delenv("GAUNTLET_ENABLED", raising=False)
+    if socket_path is None:
+        monkeypatch.delenv("GAUNTLET_SOCKET_PATH", raising=False)
+    elif socket_path == "file://definitely-not-a-socket":
+        file_path = tmp_path / "not_socket.txt"
+        file_path.write_text("x", encoding="utf-8")
+        monkeypatch.setenv("GAUNTLET_SOCKET_PATH", str(file_path))
+    else:
+        monkeypatch.setenv("GAUNTLET_SOCKET_PATH", socket_path)
+
+    connect_module = _reload_connect_module()
+    result = connect_module.connect()
+
+    assert result is None
+    assert connect_module._connected is False
+
+
+def test_connect_swallows_internal_errors(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("GAUNTLET_RNG_SEED", "not-an-int")
+
+    connect_module = _reload_connect_module()
+    result = connect_module.connect()
+
+    assert result is None
+    assert connect_module._connected is False
+
+
+def test_connect_debug_mode_warns_instead_of_raising(monkeypatch):
+    monkeypatch.setenv("GAUNTLET_ENABLED", "1")
+    monkeypatch.setenv("GAUNTLET_RNG_SEED", "not-an-int")
+    monkeypatch.setenv("GAUNTLET_DEBUG", "1")
+
+    connect_module = _reload_connect_module()
+    with pytest.warns(UserWarning, match="gauntlet.connect\\(\\) failed silently"):
+        result = connect_module.connect()
+
+    assert result is None
+    assert connect_module._connected is False

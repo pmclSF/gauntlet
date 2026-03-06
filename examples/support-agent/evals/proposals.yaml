@@ -20,107 +20,26 @@ proposals:
         - db-seed
       status: pending
       source: db_schema
-    - id: disc-py-auto-named-nominal
-      name: auto_named_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: auto_named'
-      tool: auto_named
+    - id: disc-ollama_chat-nominal
+      name: ollama_chat_nominal
+      description: 'Auto-discovered: test ollama_chat tool in nominal state'
+      tool: ollama_chat
       variant: nominal
       tags:
         - auto-discovered
-        - python-tool
+        - tool-variant
       status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-customer-balance-nominal
-      name: customer_balance_nominal
-      description: 'Auto-discovered from pydantic-ai tool decorator: customer_balance'
-      tool: customer_balance
-      variant: nominal
+      source: tool_definition
+    - id: disc-ollama_chat-timeout
+      name: ollama_chat_timeout
+      description: 'Auto-discovered: test ollama_chat tool in timeout state'
+      tool: ollama_chat
+      variant: timeout
       tags:
         - auto-discovered
-        - python-tool
-        - framework-pydantic-ai
+        - tool-variant
       status: pending
-      source: python_tool_ast
-      framework: pydantic-ai
-    - id: disc-py-customer-name-nominal
-      name: customer_name_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: customer_name'
-      tool: customer_name
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-denylist-tool-nominal
-      name: denylist_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: denylist_tool'
-      tool: denylist_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-get-weather-nominal
-      name: get_weather_nominal
-      description: 'Auto-discovered from openai-agents tool decorator: get_weather'
-      tool: get_weather
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-        - framework-openai-agents
-      status: pending
-      source: python_tool_ast
-      framework: openai-agents
-    - id: disc-py-live-tool-nominal
-      name: live_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: live_tool'
-      tool: live_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-meta-tool-nominal
-      name: meta_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: meta_tool'
-      tool: meta_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-missing-tool-nominal
-      name: missing_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: missing_tool'
-      tool: missing_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-multi-tool-nominal
-      name: multi_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: multi_tool'
-      tool: multi_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
+      source: tool_definition
     - id: disc-order_lookup-nominal
       name: order_lookup_nominal
       description: 'Auto-discovered: test order_lookup tool in nominal state'
@@ -162,28 +81,6 @@ proposals:
         - tool-variant
       status: pending
       source: tool_definition
-    - id: disc-py-passthrough-tool-nominal
-      name: passthrough_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: passthrough_tool'
-      tool: passthrough_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
-    - id: disc-py-real-tool-nominal
-      name: real_tool_nominal
-      description: 'Auto-discovered from Python @gauntlet.tool: real_tool'
-      tool: real_tool
-      variant: nominal
-      tags:
-        - auto-discovered
-        - python-tool
-      status: pending
-      source: python_tool_ast
-      framework: gauntlet
     - id: disc-send_email-malformed_response
       name: send_email_malformed_response
       description: 'Auto-discovered: test send_email tool in malformed_response state'

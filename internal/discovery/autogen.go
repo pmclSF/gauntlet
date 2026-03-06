@@ -121,7 +121,9 @@ func EnsureAutoSuite(cfg AutoSuiteConfig) (*AutoSuiteResult, error) {
 	result.GeneratedScenarios = len(docs)
 
 	// Persist hash for staleness detection on next run.
-	os.WriteFile(hashPath, []byte(inputHash), 0o644)
+	if err := os.WriteFile(hashPath, []byte(inputHash), 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write auto-scenario hash %s: %w", hashPath, err)
+	}
 
 	return result, nil
 }

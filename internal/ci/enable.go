@@ -307,6 +307,9 @@ suites:
     budget_ms: 900000  # 15 minutes
     mode: nightly
 
+runner:
+  fail_fast: false   # set true to stop on first failure
+
 assertions:
   hard_gates:
     - output_schema

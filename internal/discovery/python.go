@@ -289,10 +289,6 @@ func parsePythonFileForGauntletTools(rootDir, filePath string) ([]pythonTool, []
 						}
 					}
 				}
-				// Check for pydantic_ai Agent import
-				if imported.Original == "Agent" && isPydanticAIModule(rawModule) {
-					// Will be tracked when assigned to a variable
-				}
 			}
 			pendingDecorators = nil
 			continue
@@ -426,14 +422,6 @@ func parseDecoratorToolNameWithOverride(args, framework string) string {
 	return parseDecoratorToolName(args)
 }
 
-// isPydanticAIModule returns true if the module path is a pydantic-ai module.
-func isPydanticAIModule(module string) bool {
-	return module == "pydantic_ai" ||
-		strings.HasPrefix(module, "pydantic_ai.") ||
-		module == "pydantic_ai_slim" ||
-		strings.HasPrefix(module, "pydantic_ai_slim.")
-}
-
 func parseDecoratorToolName(args string) string {
 	if m := pythonNameArgRE.FindStringSubmatch(args); m != nil {
 		if strings.TrimSpace(m[1]) != "" {
@@ -486,9 +474,7 @@ func fileToModule(rootDir, filePath string) string {
 	}
 	rel = filepath.ToSlash(rel)
 	rel = strings.TrimSuffix(rel, ".py")
-	if strings.HasSuffix(rel, "/__init__") {
-		rel = strings.TrimSuffix(rel, "/__init__")
-	}
+	rel = strings.TrimSuffix(rel, "/__init__")
 	rel = strings.Trim(rel, "/")
 	return strings.ReplaceAll(rel, "/", ".")
 }

@@ -8,7 +8,7 @@ import json
 import os
 import time
 import warnings
-from typing import Any
+from typing import Any, Mapping, Optional
 
 from gauntlet.events import emit_event
 
@@ -18,7 +18,7 @@ def _adapter_warnings_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
-def _warn_noop(reason: str):
+def _warn_noop(reason: str) -> None:
     if _adapter_warnings_enabled():
         warnings.warn(
             f"Gauntlet LangChain adapter is running in no-op mode: {reason}",
@@ -45,7 +45,7 @@ def _to_plain(value: Any) -> Any:
     return str(value)
 
 
-def _decode_tool_input(value):
+def _decode_tool_input(value: Any) -> Any:
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -56,14 +56,13 @@ def _decode_tool_input(value):
     return _to_plain(value)
 
 
-def _extract_model_name(serialized, kwargs):
-    if isinstance(kwargs, dict):
-        invocation_params = kwargs.get("invocation_params")
-        if isinstance(invocation_params, dict):
-            for key in ("model", "model_name"):
-                value = invocation_params.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
+def _extract_model_name(serialized: Any, kwargs: Mapping[str, Any]) -> Optional[str]:
+    invocation_params = kwargs.get("invocation_params")
+    if isinstance(invocation_params, dict):
+        for key in ("model", "model_name"):
+            value = invocation_params.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     if isinstance(serialized, dict):
         kwargs_block = serialized.get("kwargs")
         if isinstance(kwargs_block, dict):
@@ -74,7 +73,7 @@ def _extract_model_name(serialized, kwargs):
     return None
 
 
-def patch_langchain_llm(llm=None):
+def patch_langchain_llm(llm: Any = None) -> Any:
     """Attach Gauntlet callbacks to a LangChain LLM/runnable when possible."""
     if os.environ.get("GAUNTLET_ENABLED") != "1":
         return llm
@@ -125,7 +124,7 @@ def patch_langchain_llm(llm=None):
     return llm
 
 
-def install_langchain_instrumentation():
+def install_langchain_instrumentation() -> dict[str, Any]:
     """Validate LangChain callback availability for runtime instrumentation."""
     if os.environ.get("GAUNTLET_ENABLED") != "1":
         return {"enabled": False, "patched": False, "reason": "gauntlet_disabled"}
@@ -136,7 +135,7 @@ def install_langchain_instrumentation():
     return {"enabled": True, "patched": False, "reason": "langchain_not_installed"}
 
 
-def get_gauntlet_callbacks():
+def get_gauntlet_callbacks() -> list[Any]:
     """Return LangChain callback handlers for Gauntlet tracing."""
     if os.environ.get("GAUNTLET_ENABLED") != "1":
         return []
@@ -149,12 +148,12 @@ def get_gauntlet_callbacks():
     class GauntletTraceCallback(BaseCallbackHandler):
         """Records tool and model calls for Gauntlet traces."""
 
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
-            self._tool_runs = {}
-            self._llm_runs = {}
+            self._tool_runs: dict[str, dict[str, Any]] = {}
+            self._llm_runs: dict[str, dict[str, Any]] = {}
 
-        def on_tool_start(self, serialized, input_str, **kwargs):
+        def on_tool_start(self, serialized: Any, input_str: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             self._tool_runs[run_id] = {
                 "start": time.time(),
@@ -162,7 +161,7 @@ def get_gauntlet_callbacks():
                 "args": _decode_tool_input(input_str),
             }
 
-        def on_tool_end(self, output, **kwargs):
+        def on_tool_end(self, output: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             state = self._tool_runs.pop(run_id, {})
             start = state.get("start", time.time())
@@ -183,7 +182,7 @@ def get_gauntlet_callbacks():
                 metadata={"framework": "langchain"},
             )
 
-        def on_tool_error(self, error, **kwargs):
+        def on_tool_error(self, error: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             state = self._tool_runs.pop(run_id, {})
             serialized = state.get("serialized", {})
@@ -198,7 +197,7 @@ def get_gauntlet_callbacks():
                 metadata={"framework": "langchain"},
             )
 
-        def on_llm_start(self, serialized, prompts, **kwargs):
+        def on_llm_start(self, serialized: Any, prompts: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             self._llm_runs[run_id] = {
                 "start": time.time(),
@@ -207,7 +206,7 @@ def get_gauntlet_callbacks():
                 "model": _extract_model_name(serialized, kwargs),
             }
 
-        def on_llm_end(self, response, **kwargs):
+        def on_llm_end(self, response: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             state = self._llm_runs.pop(run_id, {})
             start = state.get("start", time.time())
@@ -222,7 +221,7 @@ def get_gauntlet_callbacks():
                 metadata={"framework": "langchain"},
             )
 
-        def on_llm_error(self, error, **kwargs):
+        def on_llm_error(self, error: Any, **kwargs: Any) -> None:
             run_id = str(kwargs.get("run_id") or "")
             state = self._llm_runs.pop(run_id, {})
             start = state.get("start", time.time())

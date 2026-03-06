@@ -18,7 +18,7 @@ pip install gauntlet-sdk[langchain]   # LangChain support
 ## Usage
 
 ```python
-import gauntlet
+import gauntlet_sdk as gauntlet
 
 # Connect to the Gauntlet runner (no-op if not running; safe in production)
 gauntlet.connect()
@@ -30,6 +30,8 @@ def my_tool(arg: str) -> dict:
 ```
 
 In recorded mode (PR CI), `@gauntlet.tool` returns fixture responses without calling the underlying function. In production, it runs normally.
+
+Note: the canonical import namespace is `gauntlet_sdk` to avoid collisions with the unrelated `gauntlet` package on PyPI.
 
 ## License
 

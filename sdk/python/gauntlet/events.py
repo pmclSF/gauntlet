@@ -7,11 +7,11 @@ import time
 from typing import Any, Optional
 
 
-def _write_trace_line(line):
+def _write_trace_line(line: str) -> None:
     """Write a trace line to the trace file if set, else stdout."""
     trace_path = os.environ.get("GAUNTLET_TRACE_FILE")
     if trace_path:
-        with open(trace_path, "a") as f:
+        with open(trace_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
             f.flush()
     else:
@@ -22,7 +22,7 @@ def _write_trace_line(line):
 def emit_event(
     event_type: str,
     tool_name: Optional[str] = None,
-    args: Optional[dict] = None,
+    args: Optional[dict[str, Any]] = None,
     result: Optional[Any] = None,
     fixture_hit: bool = False,
     canonical_hash: Optional[str] = None,
@@ -30,8 +30,8 @@ def emit_event(
     error: Optional[str] = None,
     provider_family: Optional[str] = None,
     model: Optional[str] = None,
-    metadata: Optional[dict] = None,
-):
+    metadata: Optional[dict[str, Any]] = None,
+) -> None:
     """Emit a structured trace event."""
     event = {
         "gauntlet_event": True,
@@ -65,12 +65,12 @@ def emit_event(
 
 def emit_tool_call(
     tool_name: str,
-    args: dict,
+    args: dict[str, Any],
     result: Any,
     fixture_hit: bool,
     canonical_hash: str,
     duration_ms: int,
-):
+) -> None:
     emit_event(
         "tool_call",
         tool_name=tool_name,
@@ -82,5 +82,5 @@ def emit_tool_call(
     )
 
 
-def emit_tool_error(tool_name: str, args: dict, error: str):
+def emit_tool_error(tool_name: str, args: dict[str, Any], error: str) -> None:
     emit_event("tool_error", tool_name=tool_name, args=args, error=error)
