@@ -273,9 +273,11 @@ import gauntlet
 @gauntlet.tool(name="{{ .Name }}")
 {{ if .IsAsync }}async {{ end }}def {{ .Name }}({{ .ParamString }}){{ .ReturnAnnotation }}:
     """Wraps {{ .FuncName }} from {{ .ModulePath }}"""
-    {{ if .ImportPath }}from {{ .ImportPath }} import {{ .FuncName }} as _real_{{ .FuncName }}
-    {{ end }}{{ if .IsAsync }}return await _real_{{ .FuncName }}({{ .CallArgs }}){{ else }}return _real_{{ .FuncName }}({{ .CallArgs }}){{ end }}
-{{ end }}`))
+{{ if .ImportPath }}    from {{ .ImportPath }} import {{ .FuncName }} as _real_{{ .FuncName }}
+    {{ if .IsAsync }}return await _real_{{ .FuncName }}({{ .CallArgs }}){{ else }}return _real_{{ .FuncName }}({{ .CallArgs }}){{ end }}
+{{ else }}    # TODO: import {{ .FuncName }} from the correct module and wire it here
+    raise NotImplementedError("wire {{ .FuncName }} import")
+{{ end }}{{ end }}`))
 
 type wrapperToolData struct {
 	Name             string
@@ -422,7 +424,9 @@ func generateWorldDef(path string, sig ToolSignature) error {
 		Tool:        sig.Name,
 		Description: fmt.Sprintf("Auto-discovered from %s (%s)", sig.Framework, sig.File),
 		States: map[string]worldStateDef{
-			"nominal": {Description: "Normal operation"},
+			"nominal":  {Description: "Normal operation"},
+			"error":    {Description: "Returns an error response"},
+			"degraded": {Description: "Partial or degraded response"},
 		},
 	}
 	if sig.Docstring != "" {
