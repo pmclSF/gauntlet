@@ -121,18 +121,14 @@ func resolveSuitePathForRun(suite, configPath string, explicitConfig bool) runSu
 	return result
 }
 
-func ensureScenarioSchemaDirective(path string) error {
+func missingScenarioSchemaDirective(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
 	}
-	content := string(data)
-	if strings.HasPrefix(content, scenarioSchemaDirective) {
-		return nil
-	}
-	updated := scenarioSchemaDirective + "\n" + content
-	return os.WriteFile(path, []byte(updated), 0o644)
+	return !strings.HasPrefix(string(data), scenarioSchemaDirective), nil
 }
+
 
 func validateSuiteFiles(suiteDir, toolsDir, dbDir string) (map[string][]string, error) {
 	entries, err := os.ReadDir(suiteDir)
@@ -168,9 +164,8 @@ func validateSuiteFiles(suiteDir, toolsDir, dbDir string) (map[string][]string, 
 	loaded := make([]loadedScenario, 0, len(filePaths))
 
 	for _, path := range filePaths {
-		if err := ensureScenarioSchemaDirective(path); err != nil {
-			report[path] = append(report[path], fmt.Sprintf("failed to inject schema directive: %v", err))
-			continue
+		if missing, _ := missingScenarioSchemaDirective(path); missing {
+			fmt.Printf("  WARN: %s missing schema directive\n", path)
 		}
 		sc, loadErr := scenario.LoadFile(path)
 		if loadErr != nil {

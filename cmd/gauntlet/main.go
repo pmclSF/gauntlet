@@ -423,6 +423,13 @@ func newBaselineCmd() *cobra.Command {
 								}
 							}
 						}
+						if aSpec.Type == "forbidden_content" {
+							if pattern, ok := aSpec.Raw["pattern"]; ok {
+								if p, ok := pattern.(string); ok && p != "" {
+									forbiddenContent = append(forbiddenContent, p)
+								}
+							}
+						}
 					}
 					if outputSchema != nil {
 						if reqRaw, ok := outputSchema["required"]; ok {
@@ -1045,7 +1052,7 @@ func newDiscoverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dbSchemasDir, "db-schemas", "", "Database schema/definition directory")
 	cmd.Flags().StringVar(&traceDir, "trace-dir", "", "Trace directory for trace-aware discovery")
 	cmd.Flags().StringVar(&excludeTools, "exclude-tools", "", "Comma-separated tool names to exclude")
-	cmd.Flags().StringVar(&output, "output", "", "Save proposals to file")
+	cmd.Flags().StringVar(&output, "output", "evals/proposals.yaml", "Save proposals to file")
 
 	return cmd
 }

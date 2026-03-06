@@ -303,12 +303,13 @@ states:
 		t.Fatalf("validate command failed: %v", err)
 	}
 
+	// Validate should NOT mutate files — verify the file is unchanged
 	data, err := os.ReadFile(filepath.Join(suiteDir, "order.yaml"))
 	if err != nil {
 		t.Fatalf("read scenario after validate: %v", err)
 	}
-	if !strings.HasPrefix(string(data), scenarioSchemaDirective) {
-		t.Fatalf("expected schema directive injected, got:\n%s", string(data))
+	if strings.HasPrefix(string(data), scenarioSchemaDirective) {
+		t.Fatal("validate should not mutate scenario files (read-only operation)")
 	}
 }
 
