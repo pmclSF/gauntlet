@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,50 +38,14 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 		}
 	}
 
-	// Determine paths
-	evalsDir := r.Config.EvalsDir
-	if evalsDir == "" {
-		evalsDir = "evals"
-	}
-	suiteDir := r.Config.SuiteDir
-	if suiteDir == "" {
-		suiteDir = filepath.Join(evalsDir, r.Config.Suite)
-	}
-	toolsDir := r.Config.ToolsDir
-	if toolsDir == "" {
-		toolsDir = filepath.Join(evalsDir, "world", "tools")
-	}
-	dbDir := r.Config.DBDir
-	if dbDir == "" {
-		dbDir = filepath.Join(evalsDir, "world", "databases")
-	}
-	baselineDir := r.Config.BaselineDir
-	if baselineDir == "" {
-		baselineDir = filepath.Join(evalsDir, "baselines")
-	}
+	paths := resolvePaths(r.Config)
 
-	// Load scenarios
-	scenarios, err := scenario.LoadSuite(suiteDir)
+	scenarios, err := loadAndFilterScenarios(paths.SuiteDir, r.Config.ScenarioFilter, r.Config.Suite)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load suite: %w", err)
+		return nil, err
 	}
 
-	// Filter if requested
-	if r.Config.ScenarioFilter != "" {
-		var filtered []*scenario.Scenario
-		for _, s := range scenarios {
-			if s.Name == r.Config.ScenarioFilter {
-				filtered = append(filtered, s)
-			}
-		}
-		if len(filtered) == 0 {
-			return nil, fmt.Errorf("scenario '%s' not found in suite '%s'", r.Config.ScenarioFilter, r.Config.Suite)
-		}
-		scenarios = filtered
-	}
-
-	// Load world state
-	worldState, err := world.Assemble(toolsDir, dbDir)
+	worldState, err := world.Assemble(paths.ToolsDir, paths.DBDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble world: %w", err)
 	}
@@ -130,7 +93,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 		if effectiveScenarioBudgetMs <= 0 || remainingSuiteMs < effectiveScenarioBudgetMs {
 			effectiveScenarioBudgetMs = remainingSuiteMs
 		}
-		exec := r.runScenario(ctx, s, worldState, baselineDir, requiresBlockedEgress, effectiveScenarioBudgetMs)
+		exec := r.runScenario(ctx, s, worldState, paths.BaselineDir, requiresBlockedEgress, effectiveScenarioBudgetMs)
 		sr := exec.Result
 		sr.FailureCategory = inferFailureCategory(sr)
 		exec.Result = sr
@@ -157,7 +120,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	// Write output artifacts
 	outputDir := r.Config.OutputDir
 	if outputDir == "" {
-		outputDir = filepath.Join(evalsDir, "runs", fmt.Sprintf("%s-%s", startTime.Format("20060102-150405"), result.Commit))
+		outputDir = filepath.Join(paths.EvalsDir, "runs", fmt.Sprintf("%s-%s", startTime.Format("20060102-150405"), result.Commit))
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return result, fmt.Errorf("failed to create output directory: %w", err)
@@ -485,82 +448,6 @@ func detectFirstClassDocketTag(results []assertions.Result, toolTrace []tut.Trac
 	return ""
 }
 
-func buildToolState(ws *world.State, toolStates map[string]string) map[string]assertions.ToolState {
-	result := make(map[string]assertions.ToolState)
-	for toolName, state := range toolStates {
-		ts := assertions.ToolState{
-			Name:  toolName,
-			State: state,
-		}
-		if td, ok := ws.Tools[toolName]; ok {
-			if sd, ok := td.States[state]; ok && sd.Response != nil {
-				if raw, err := json.Marshal(sd.Response); err == nil {
-					ts.Response = raw
-				}
-			}
-		}
-		result[toolName] = ts
-	}
-	return result
-}
-
-func getToolSequence(bl *baseline.Contract) []string {
-	if bl.ToolSequence != nil {
-		return bl.ToolSequence.Required
-	}
-	return nil
-}
-
-func validateWorldToolRefs(scenarios []*scenario.Scenario, ws *world.State) error {
-	availableTools := sortedToolNames(ws.Tools)
-	var violations []string
-	for _, s := range scenarios {
-		for toolName, stateName := range s.World.Tools {
-			toolDef, ok := ws.Tools[toolName]
-			if !ok {
-				violations = append(violations, fmt.Sprintf(
-					"scenario %q: tool %q not found in world definitions\n  available tools: %s",
-					s.Name,
-					toolName,
-					strings.Join(availableTools, ", "),
-				))
-				continue
-			}
-			if _, ok := toolDef.States[stateName]; !ok {
-				availableStates := sortedToolStates(toolDef.States)
-				violations = append(violations, fmt.Sprintf(
-					"scenario %q: tool %q has no state %q\n  available states: %s",
-					s.Name,
-					toolName,
-					stateName,
-					strings.Join(availableStates, ", "),
-				))
-			}
-		}
-	}
-	if len(violations) == 0 {
-		return nil
-	}
-	return fmt.Errorf("invalid world tool references:\n  - %s", strings.Join(violations, "\n  - "))
-}
-
-func sortedToolNames(tools map[string]*world.ToolDef) []string {
-	names := make([]string, 0, len(tools))
-	for name := range tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func sortedToolStates(states map[string]*world.ToolStateDef) []string {
-	names := make([]string, 0, len(states))
-	for name := range states {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
 
 func (r *Runner) adapterCapabilityDiagnostics(handle tut.Handle, traces []tut.TraceEvent) []assertions.Result {
 	if r.Adapter == nil {
@@ -749,6 +636,13 @@ func localeEquivalent(actual, expected string) bool {
 	return strings.Contains(actualNorm, expectedNorm)
 }
 
+func getToolSequence(bl *baseline.Contract) []string {
+	if bl.ToolSequence != nil {
+		return bl.ToolSequence.Required
+	}
+	return nil
+}
+
 func getForbiddenContent(bl *baseline.Contract) []string {
 	if bl.Output != nil {
 		return bl.Output.ForbiddenContent
@@ -764,56 +658,6 @@ func getRequiredFields(bl *baseline.Contract) []string {
 }
 
 
-func prepareScenarioDatabases(ws *world.State, s *scenario.Scenario) (map[string]string, func(), error) {
-	if len(s.World.Databases) == 0 {
-		return map[string]string{}, func() {}, nil
-	}
-
-	runDir, err := os.MkdirTemp("", "gauntlet-db-*")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create DB temp dir: %w", err)
-	}
-	cleanup := func() {
-		_ = os.RemoveAll(runDir)
-	}
-
-	env := make(map[string]string)
-	for dbName, spec := range s.World.Databases {
-		dbDef, ok := ws.Databases[dbName]
-		if !ok {
-			cleanup()
-			return nil, nil, fmt.Errorf("database '%s' referenced by scenario '%s' not found in world definitions", dbName, s.Name)
-		}
-		dbPath, err := world.SeedDB(dbDef, spec.SeedSets, runDir)
-		if err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("failed to seed database '%s' for scenario '%s': %w", dbName, s.Name, err)
-		}
-		envName := "GAUNTLET_DB_" + toEnvToken(dbName)
-		env[envName] = sqliteURI(dbPath)
-	}
-
-	return env, cleanup, nil
-}
-
-var nonEnvTokenChars = regexp.MustCompile(`[^A-Za-z0-9]+`)
-
-func toEnvToken(name string) string {
-	normalized := nonEnvTokenChars.ReplaceAllString(strings.ToUpper(name), "_")
-	normalized = strings.Trim(normalized, "_")
-	if normalized == "" {
-		return "DB"
-	}
-	return normalized
-}
-
-func sqliteURI(path string) string {
-	p := filepath.ToSlash(path)
-	if strings.HasPrefix(p, "/") {
-		return "sqlite:////" + strings.TrimPrefix(p, "/")
-	}
-	return "sqlite:///" + p
-}
 
 func getCommit() string {
 	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
