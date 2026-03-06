@@ -90,13 +90,8 @@ type TraceEntry struct {
 	CompletionTokens int       `json:"completion_tokens,omitempty"`
 }
 
-// directClient bypasses HTTP_PROXY/HTTPS_PROXY env vars to prevent the proxy
-// from routing live/passthrough requests through itself in an infinite loop.
-var directClient = &http.Client{
-	Transport: &http.Transport{
-		Proxy: nil,
-	},
-}
+// defaultTransport is the shared upstream transport for live/passthrough requests.
+var defaultTransport = newUpstreamTransport()
 
 // Proxy is the local MITM HTTP/HTTPS proxy.
 type Proxy struct {
@@ -325,7 +320,7 @@ func (p *Proxy) handleDecryptedConnection(conn net.Conn, hostname string) {
 		}
 
 		// Process through interception pipeline
-		respBody, statusCode, interceptErr := p.interceptRequest(hostname, req.URL.Path, headerMap(req.Header), body)
+		respBody, statusCode, interceptErr := p.interceptRequest(req.Method, hostname, req.URL.Path, req.URL.RawQuery, headerMap(req.Header), body)
 		if interceptErr != nil {
 			p.writeConnError(conn, interceptErr)
 			return
@@ -379,7 +374,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		hostname = strings.Split(hostname, ":")[0]
 	}
 
-	respBody, statusCode, err := p.interceptRequest(hostname, r.URL.Path, headerMap(r.Header), body)
+	respBody, statusCode, err := p.interceptRequest(r.Method, hostname, r.URL.Path, r.URL.RawQuery, headerMap(r.Header), body)
 	if err != nil {
 		p.writeHTTPError(w, err)
 		return
@@ -392,7 +387,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *Proxy) interceptRequest(hostname, path string, headers map[string]string, body []byte) ([]byte, int, error) {
+func (p *Proxy) interceptRequest(method, hostname, path, rawQuery string, headers map[string]string, body []byte) ([]byte, int, error) {
 	start := time.Now()
 
 	// Detect provider
@@ -426,9 +421,9 @@ func (p *Proxy) interceptRequest(hostname, path string, headers map[string]strin
 	case ModeRecorded:
 		return p.handleRecorded(normalizer, canonical, canonicalBytes, hash, start)
 	case ModeLive:
-		return p.handleLive(normalizer, hostname, path, headers, body, canonical, canonicalBytes, hash, start)
+		return p.handleLive(normalizer, method, hostname, path, rawQuery, headers, body, canonical, canonicalBytes, hash, start)
 	default:
-		return p.handlePassthrough(hostname, path, headers, body)
+		return p.handlePassthrough(method, hostname, path, rawQuery, headers, body)
 	}
 }
 
@@ -471,28 +466,13 @@ func (p *Proxy) handleRecorded(normalizer providers.ProviderNormalizer, canonica
 	return normalizedResponse, 200, nil
 }
 
-func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, hostname, path string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
+func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, method, hostname, path, rawQuery string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
 	// Normalize streaming requests so recording captures single-response fixtures.
 	path, body = stripStreamFlag(path, canonical.ProviderFamily, body)
 
-	url := "https://" + hostname + path
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := directClient.Do(req)
+	respBody, statusCode, err := defaultTransport.Forward(context.Background(), method, hostname, path, rawQuery, headers, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("live request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to read live response: %w", err)
 	}
 	promptTokens, completionTokens := normalizer.ExtractUsage(respBody)
 	normalizedResponse, err := normalizer.NormalizeResponseForFixture(respBody)
@@ -536,27 +516,11 @@ func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, hostname, pa
 		CompletionTokens: completionTokens,
 	})
 
-	return normalizedResponse, resp.StatusCode, nil
+	return normalizedResponse, statusCode, nil
 }
 
-func (p *Proxy) handlePassthrough(hostname, path string, headers map[string]string, body []byte) ([]byte, int, error) {
-	url := "https://" + hostname + path
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := directClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	return respBody, resp.StatusCode, err
+func (p *Proxy) handlePassthrough(method, hostname, path, rawQuery string, headers map[string]string, body []byte) ([]byte, int, error) {
+	return defaultTransport.Forward(context.Background(), method, hostname, path, rawQuery, headers, body)
 }
 
 func (p *Proxy) modelVersionHint(requestedCanonical []byte, requestedModel string, candidates []fixture.FixtureMissCandidate) string {
