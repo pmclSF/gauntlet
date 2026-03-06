@@ -203,7 +203,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["type", "prompt"],
+            "required": ["type", "judge", "prompt"],
             "properties": {
               "type": { "const": "semantic_match" },
               "judge": { "type": "string" },
