@@ -129,18 +129,6 @@ func missingScenarioSchemaDirective(path string) (bool, error) {
 	return !strings.HasPrefix(string(data), scenarioSchemaDirective), nil
 }
 
-func ensureScenarioSchemaDirective(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	content := string(data)
-	if strings.HasPrefix(content, scenarioSchemaDirective) {
-		return nil
-	}
-	updated := scenarioSchemaDirective + "\n" + content
-	return os.WriteFile(path, []byte(updated), 0o644)
-}
 
 func validateSuiteFiles(suiteDir, toolsDir, dbDir string) (map[string][]string, error) {
 	entries, err := os.ReadDir(suiteDir)
