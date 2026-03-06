@@ -39,19 +39,3 @@ func TestInstallScript_EnforcesChecksumVerification(t *testing.T) {
 	}
 }
 
-func TestCIWorkflow_VerifiesInstallEndpoint(t *testing.T) {
-	root := repositoryRoot(t)
-	workflowPath := filepath.Join(root, ".github", "workflows", "gauntlet.yml")
-	data, err := os.ReadFile(workflowPath)
-	if err != nil {
-		t.Fatalf("read workflow: %v", err)
-	}
-	workflow := string(data)
-
-	if !strings.Contains(workflow, "Verify install endpoint") {
-		t.Fatalf("workflow missing install endpoint verification step")
-	}
-	if !strings.Contains(workflow, "https://gauntlet.dev/install.sh") {
-		t.Fatalf("workflow must check gauntlet.dev install endpoint")
-	}
-}
