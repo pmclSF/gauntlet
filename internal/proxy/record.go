@@ -14,20 +14,20 @@ import (
 
 // handleLive forwards a request to the real upstream endpoint, records the
 // response as a fixture, and returns the response to the caller.
-func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, method, hostname, path, rawQuery string, headers map[string]string, body []byte, canonical *providers.CanonicalRequest, canonicalBytes []byte, hash string, start time.Time) ([]byte, int, error) {
+func (p *Proxy) handleLive(ir *interceptedRequest) ([]byte, int, error) {
 	// Normalize streaming requests so recording captures single-response fixtures.
-	path, body = stripStreamFlag(path, canonical.ProviderFamily, body)
+	path, body := stripStreamFlag(ir.Path, ir.Canonical.ProviderFamily, ir.Body)
 
-	respBody, statusCode, err := defaultTransport.Forward(context.Background(), method, hostname, path, rawQuery, headers, body)
+	respBody, statusCode, err := defaultTransport.Forward(context.Background(), ir.Method, ir.Hostname, path, ir.RawQuery, ir.Headers, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("live request failed: %w", err)
 	}
-	promptTokens, completionTokens := normalizer.ExtractUsage(respBody)
-	normalizedResponse, err := normalizer.NormalizeResponseForFixture(respBody)
+	promptTokens, completionTokens := ir.Normalizer.ExtractUsage(respBody)
+	normalizedResponse, err := ir.Normalizer.NormalizeResponseForFixture(respBody)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to normalize live response: %w", err)
 	}
-	if err := fixture.ValidateModelResponse(canonical.ProviderFamily, normalizedResponse); err != nil {
+	if err := fixture.ValidateModelResponse(ir.Canonical.ProviderFamily, normalizedResponse); err != nil {
 		return nil, 0, fmt.Errorf("model response schema validation failed: %w", err)
 	}
 
@@ -36,17 +36,17 @@ func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, method, host
 
 	// Record as fixture
 	f := &fixture.ModelFixture{
-		FixtureID:         hash,
+		FixtureID:         ir.Hash,
 		HashVersion:       1,
-		CanonicalHash:     hash,
-		ProviderFamily:    canonical.ProviderFamily,
-		Model:             canonical.Model,
-		CanonicalRequest:  canonicalBytes,
+		CanonicalHash:     ir.Hash,
+		ProviderFamily:    ir.Canonical.ProviderFamily,
+		Model:             ir.Canonical.Model,
+		CanonicalRequest:  ir.CanonicalBytes,
 		Response:          redactedResp,
 		ResponseCode:      statusCode,
 		RecordedAt:        time.Now(),
 		RecordedBy:        "live",
-		Provenance:        fixture.BuildProvenance(headers, "proxy_live"),
+		Provenance:        fixture.BuildProvenance(ir.Headers, "proxy_live"),
 		Suite:             p.Suite,
 		ScenarioSetSHA256: p.ScenarioSetSHA256,
 	}
@@ -55,12 +55,12 @@ func (p *Proxy) handleLive(normalizer providers.ProviderNormalizer, method, host
 	}
 
 	p.recordTrace(TraceEntry{
-		Timestamp:        start,
-		ProviderFamily:   canonical.ProviderFamily,
-		Model:            canonical.Model,
-		CanonicalHash:    hash,
+		Timestamp:        ir.Start,
+		ProviderFamily:   ir.Canonical.ProviderFamily,
+		Model:            ir.Canonical.Model,
+		CanonicalHash:    ir.Hash,
 		FixtureHit:       false,
-		DurationMs:       int(time.Since(start).Milliseconds()),
+		DurationMs:       int(time.Since(ir.Start).Milliseconds()),
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 	})

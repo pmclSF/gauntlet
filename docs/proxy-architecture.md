@@ -1,25 +1,30 @@
-# Proxy Subsystem — Current State
+# Proxy Architecture
 
-## Architecture
+## Responsibilities
 
-The proxy is a local MITM HTTP/HTTPS proxy at `internal/proxy/`. All model
-calls from the TUT are routed through it via `HTTPS_PROXY` env injection.
+The proxy is the single trust boundary for deterministic agent evaluation.
+It guarantees replay integrity, fixture correctness, provider normalization,
+and traffic interception. All model calls from the TUT are routed through
+it via `HTTPS_PROXY` env injection at `internal/proxy/`.
 
 ### File Layout
 
 ```
 internal/proxy/
-  proxy.go           # ~150 lines: types, Proxy struct, constructor, Start/Stop, EnvVars, handleRequest
+  proxy.go           # ~85 lines: types, Proxy struct, constructor, handleRequest dispatcher
+  server.go          # Server lifecycle: Start, Stop (with read/write/idle timeouts)
+  env.go             # EnvVars: proxy environment injection for TUT
   connect.go         # CONNECT/TLS MITM: handleConnect, handleDecryptedConnection, tunnelDirect
   http.go            # Plain HTTP handler: handleHTTP
-  intercept.go       # Interception pipeline: interceptRequest, isMalformedJSONErr
+  intercept.go       # Interception pipeline: interceptedRequest struct, interceptRequest, isMalformedJSONErr
   replay.go          # Recorded mode: handleRecorded, modelVersionHint, canonicalEquivalentIgnoringModel
   record.go          # Live mode: handleLive, stripStreamFlag
   passthrough.go     # Passthrough mode: handlePassthrough
-  transport.go       # Upstream transport with explicit timeouts
+  transport.go       # Upstream transport with explicit timeouts (dial/TLS/response/idle)
   trace.go           # TraceWriter, TraceEntry, recordTrace, Traces
   errors.go          # proxyRequestError, error response helpers
-  helpers.go         # headerMap, requestHeaderBytes, readRequestBody, limits, isWebSocketUpgrade
+  limits.go          # Request guards: body size, header size, request count, WebSocket rejection
+  helpers.go         # headerMap
   tls.go             # CA management, cert issuance, rotation
   providers/
     detector.go      # Provider detection (priority-ordered)
@@ -82,13 +87,11 @@ All upstream requests go through `upstreamTransport` with explicit timeouts:
 1. **Method preserved** — upstream requests use original HTTP method (was hardcoded POST)
 2. **Query strings preserved** — rawQuery forwarded to upstream (was dropped)
 3. **Recorded status code replayed** — fixtures replay their ResponseCode (was always 200)
-4. **Transport timeouts** — explicit dial/TLS/response timeouts prevent hanging (was none)
+4. **Transport timeouts** — explicit dial/TLS/response timeouts on upstream transport (was none)
+5. **Unknown-provider non-JSON** — `UnknownNormalizer` now handles non-JSON and empty bodies gracefully (was hard failure)
+6. **Server timeouts** — HTTP server has read/write/idle timeouts (was none)
 
 ## Remaining Known Issues
-
-### Bug 5: Unknown-provider requires JSON (providers/unknown.go)
-`UnknownNormalizer.Normalize` calls `json.Unmarshal` and fails hard on
-non-JSON or empty bodies. Should allow raw-body fallback for live/passthrough.
 
 ### Response Content-Type always JSON
 All responses have `Content-Type: application/json` hardcoded.
