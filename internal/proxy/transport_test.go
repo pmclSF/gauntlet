@@ -21,12 +21,15 @@ func TestUpstreamTransport_PreservesMethod(t *testing.T) {
 	host := strings.TrimPrefix(srv.URL, "https://")
 
 	for _, method := range []string{"GET", "POST", "PUT", "DELETE", "PATCH"} {
-		_, _, err := transport.Forward(t.Context(), method, host, "/v1/chat/completions", "", nil, []byte(`{"model":"test"}`))
+		resp, err := transport.Forward(t.Context(), method, host, "/v1/chat/completions", "", nil, []byte(`{"model":"test"}`))
 		if err != nil {
 			t.Fatalf("Forward(%s) failed: %v", method, err)
 		}
 		if receivedMethod != method {
 			t.Errorf("Forward(%s): upstream received %s", method, receivedMethod)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Forward(%s): status = %d, want 200", method, resp.StatusCode)
 		}
 	}
 }
@@ -43,7 +46,7 @@ func TestUpstreamTransport_PreservesQueryString(t *testing.T) {
 	transport := &upstreamTransport{client: srv.Client()}
 	host := strings.TrimPrefix(srv.URL, "https://")
 
-	_, _, err := transport.Forward(t.Context(), "POST", host, "/v1/models", "key=abc123&version=2", nil, []byte(`{}`))
+	_, err := transport.Forward(t.Context(), "POST", host, "/v1/models", "key=abc123&version=2", nil, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("Forward failed: %v", err)
 	}
@@ -62,12 +65,12 @@ func TestUpstreamTransport_PreservesUpstreamStatusCode(t *testing.T) {
 	transport := &upstreamTransport{client: srv.Client()}
 	host := strings.TrimPrefix(srv.URL, "https://")
 
-	_, status, err := transport.Forward(t.Context(), "POST", host, "/v1/chat/completions", "", nil, []byte(`{"model":"test"}`))
+	resp, err := transport.Forward(t.Context(), "POST", host, "/v1/chat/completions", "", nil, []byte(`{"model":"test"}`))
 	if err != nil {
 		t.Fatalf("Forward failed: %v", err)
 	}
-	if status != http.StatusTooManyRequests {
-		t.Errorf("status = %d, want %d", status, http.StatusTooManyRequests)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
 	}
 }
 
@@ -85,7 +88,7 @@ func TestUpstreamTransport_EmptyBodyGET(t *testing.T) {
 	transport := &upstreamTransport{client: srv.Client()}
 	host := strings.TrimPrefix(srv.URL, "https://")
 
-	_, _, err := transport.Forward(t.Context(), "GET", host, "/v1/models", "", nil, nil)
+	_, err := transport.Forward(t.Context(), "GET", host, "/v1/models", "", nil, nil)
 	if err != nil {
 		t.Fatalf("Forward failed: %v", err)
 	}
@@ -94,5 +97,36 @@ func TestUpstreamTransport_EmptyBodyGET(t *testing.T) {
 	}
 	if receivedContentLength > 0 {
 		t.Errorf("content-length = %d, want 0 for empty body GET", receivedContentLength)
+	}
+}
+
+func TestUpstreamTransport_PreservesResponseHeaders(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Retry-After", "30")
+		w.Header().Set("X-Custom-Header", "should-be-filtered")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limited"))
+	}))
+	defer srv.Close()
+
+	transport := &upstreamTransport{client: srv.Client()}
+	host := strings.TrimPrefix(srv.URL, "https://")
+
+	resp, err := transport.Forward(t.Context(), "POST", host, "/v1/chat/completions", "", nil, []byte(`{"model":"test"}`))
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", resp.StatusCode)
+	}
+	if resp.Headers["Content-Type"] != "text/plain" {
+		t.Errorf("Content-Type = %q, want text/plain", resp.Headers["Content-Type"])
+	}
+	if resp.Headers["Retry-After"] != "30" {
+		t.Errorf("Retry-After = %q, want 30", resp.Headers["Retry-After"])
+	}
+	if _, ok := resp.Headers["X-Custom-Header"]; ok {
+		t.Error("X-Custom-Header should not be in allowlisted headers")
 	}
 }

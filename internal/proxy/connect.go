@@ -123,22 +123,25 @@ func (p *Proxy) handleDecryptedConnection(conn net.Conn, hostname string) {
 			return
 		}
 
-		// Process through interception pipeline
-		respBody, statusCode, interceptErr := p.interceptRequest(req.Method, hostname, req.URL.Path, req.URL.RawQuery, headerMap(req.Header), body)
+		// Process through interception pipeline.
+		// CONNECT-tunneled requests parsed via http.ReadRequest have a
+		// background context; this is expected since there is no upstream
+		// HTTP handler context to inherit.
+		intercepted, interceptErr := p.interceptRequest(req.Context(), req.Method, hostname, req.URL.Path, req.URL.RawQuery, headerMap(req.Header), body)
 		if interceptErr != nil {
 			p.writeConnError(conn, interceptErr)
 			return
 		}
 
 		resp := &http.Response{
-			StatusCode:    statusCode,
+			StatusCode:    intercepted.Status,
 			ProtoMajor:    1,
 			ProtoMinor:    1,
 			Header:        make(http.Header),
-			Body:          io.NopCloser(bytes.NewReader(respBody)),
-			ContentLength: int64(len(respBody)),
+			Body:          io.NopCloser(bytes.NewReader(intercepted.Body)),
+			ContentLength: int64(len(intercepted.Body)),
 		}
-		resp.Header.Set("Content-Type", "application/json")
+		setConnResponseHeaders(resp.Header, intercepted.Headers)
 		if err := resp.Write(conn); err != nil {
 			return
 		}
