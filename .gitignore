@@ -24,3 +24,7 @@ node_modules/
 .claude/
 .DS_Store
 /gauntlet
+
+# Review/planning artifacts
+ADVERSE_REVIEW_IMPROVEMENTS.md
+IMPLEMENTATION_PLAN.md
