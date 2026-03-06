@@ -378,6 +378,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) saveProposals() {
+	// TODO(stage3): Return this error to the caller so mutation endpoints report failures.
 	path := filepath.Join(s.EvalsDir, "proposals.yaml")
 	if err := discovery.SaveProposals(s.proposals, path); err != nil {
 		log.Printf("WARN: failed to save proposals: %v", err)

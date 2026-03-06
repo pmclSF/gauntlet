@@ -117,6 +117,7 @@ func WrapWithEgressBlock(cmd *exec.Cmd) (*exec.Cmd, error) {
 }
 
 func wrapDarwin(cmd *exec.Cmd) (*exec.Cmd, error) {
+	// TODO(stage1): Duplicates sandbox-exec wrapping in tut/process.go — unify into shared package.
 	// Use sandbox-exec with a deny-network profile
 	profile := `(version 1)(allow default)(deny network*)`
 	args := []string{"-p", profile, cmd.Path}
@@ -131,6 +132,7 @@ func wrapDarwin(cmd *exec.Cmd) (*exec.Cmd, error) {
 }
 
 func wrapLinux(cmd *exec.Cmd) (*exec.Cmd, error) {
+	// TODO(stage1): Duplicates unshare wrapping in tut/process.go — unify into shared package.
 	// Use unshare --net to create a new network namespace
 	args := []string{"--net", cmd.Path}
 	args = append(args, cmd.Args[1:]...)
