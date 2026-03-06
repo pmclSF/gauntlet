@@ -513,25 +513,66 @@ func TestHandleRunsWithData(t *testing.T) {
 	}
 }
 
-func TestCORSHeaders(t *testing.T) {
-	s := NewServer(":8080", t.TempDir(), nil)
-
+func TestCORSHeaders_LocalhostAllowed(t *testing.T) {
+	s := NewServer("localhost:8080", t.TempDir(), nil)
 	handler := corsMiddleware(http.HandlerFunc(s.handleProposals))
 
 	req := httptest.NewRequest("OPTIONS", "/api/proposals", nil)
+	req.Header.Set("Origin", "http://localhost:7432")
 	w := httptest.NewRecorder()
-
 	handler.ServeHTTP(w, req)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("OPTIONS status: got %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if v := resp.Header.Get("Access-Control-Allow-Origin"); v != "*" {
-		t.Errorf("CORS Allow-Origin: got %q, want %q", v, "*")
+	if v := resp.Header.Get("Access-Control-Allow-Origin"); v != "http://localhost:7432" {
+		t.Errorf("CORS Allow-Origin: got %q, want localhost origin echoed", v)
 	}
 	if v := resp.Header.Get("Access-Control-Allow-Methods"); v == "" {
 		t.Error("CORS Allow-Methods header missing")
+	}
+}
+
+func TestCORSHeaders_ExternalOriginBlocked(t *testing.T) {
+	s := NewServer("localhost:8080", t.TempDir(), nil)
+	handler := corsMiddleware(http.HandlerFunc(s.handleProposals))
+
+	req := httptest.NewRequest("GET", "/api/proposals", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if v := w.Header().Get("Access-Control-Allow-Origin"); v != "" {
+		t.Errorf("external origin should not get CORS header, got %q", v)
+	}
+}
+
+func TestIsLocalhostAddr(t *testing.T) {
+	tests := []struct {
+		addr string
+		want bool
+	}{
+		{"localhost:7432", true},
+		{"127.0.0.1:7432", true},
+		{"::1:7432", false}, // not valid host:port parse
+		{"[::1]:7432", true},
+		{":7432", true},  // empty host = localhost
+		{"0.0.0.0:7432", false},
+		{"192.168.1.1:7432", false},
+	}
+	for _, tt := range tests {
+		if got := isLocalhostAddr(tt.addr); got != tt.want {
+			t.Errorf("isLocalhostAddr(%q) = %v, want %v", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestStartRejectsNonLocalhostAddr(t *testing.T) {
+	s := NewServer("0.0.0.0:7432", t.TempDir(), nil)
+	err := s.Start()
+	if err == nil {
+		t.Fatal("expected error for non-localhost addr")
 	}
 }
 

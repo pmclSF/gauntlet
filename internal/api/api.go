@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,8 +43,11 @@ func NewServer(addr, evalsDir string, staticFS fs.FS) *Server {
 	}
 }
 
-// Start begins serving the API.
+// Start begins serving the API. The server only binds to localhost interfaces.
 func (s *Server) Start() error {
+	if !isLocalhostAddr(s.Addr) {
+		return fmt.Errorf("gauntlet API server must bind to localhost, got %q", s.Addr)
+	}
 	if err := s.loadData(); err != nil {
 		log.Printf("WARN: failed to load data: %v", err)
 	}
@@ -85,7 +89,10 @@ func (s *Server) Start() error {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if isLocalhostOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
@@ -94,6 +101,33 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isLocalhostAddr(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == ""
+}
+
+func isLocalhostOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"http://localhost",
+		"http://127.0.0.1",
+		"http://[::1]",
+		"https://localhost",
+		"https://127.0.0.1",
+		"https://[::1]",
+	} {
+		if strings.HasPrefix(origin, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func spaHandler(fsys http.FileSystem) http.Handler {
@@ -163,7 +197,10 @@ func (s *Server) handleApproveProposal(w http.ResponseWriter, r *http.Request) {
 	for i := range s.proposals {
 		if s.proposals[i].ID == req.ID {
 			s.proposals[i].Status = "approved"
-			s.saveProposals()
+			if err := s.saveProposals(); err != nil {
+				http.Error(w, fmt.Sprintf("failed to save proposal: %v", err), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(w).Encode(s.proposals[i]); err != nil {
 				http.Error(w, fmt.Sprintf("failed to encode approved proposal response: %v", err), http.StatusInternalServerError)
@@ -195,7 +232,10 @@ func (s *Server) handleRejectProposal(w http.ResponseWriter, r *http.Request) {
 	for i := range s.proposals {
 		if s.proposals[i].ID == req.ID {
 			s.proposals[i].Status = "rejected"
-			s.saveProposals()
+			if err := s.saveProposals(); err != nil {
+				http.Error(w, fmt.Sprintf("failed to save proposal: %v", err), http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(w).Encode(s.proposals[i]); err != nil {
 				http.Error(w, fmt.Sprintf("failed to encode rejected proposal response: %v", err), http.StatusInternalServerError)
@@ -377,10 +417,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) saveProposals() {
-	// TODO(stage3): Return this error to the caller so mutation endpoints report failures.
+func (s *Server) saveProposals() error {
 	path := filepath.Join(s.EvalsDir, "proposals.yaml")
-	if err := discovery.SaveProposals(s.proposals, path); err != nil {
-		log.Printf("WARN: failed to save proposals: %v", err)
-	}
+	return discovery.SaveProposals(s.proposals, path)
 }
