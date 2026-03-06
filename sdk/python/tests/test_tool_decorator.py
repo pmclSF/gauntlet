@@ -30,6 +30,7 @@ class TestToolDecorator:
             "GAUNTLET_ENABLED",
             "GAUNTLET_MODEL_MODE",
             "GAUNTLET_FIXTURE_DIR",
+            "GAUNTLET_ALLOW_SENSITIVE_FIXTURE",
             "GAUNTLET_REPLAY_LOCKFILE",
             "GAUNTLET_REQUIRE_TOOL_FIXTURE_LOCKFILE",
             "GAUNTLET_REQUIRE_FIXTURE_SIGNATURES",
@@ -452,6 +453,48 @@ class TestToolDecorator:
             saved = json.load(f)
         assert saved["canonical_hash"] == fixture_hash
         assert saved["response"] == {"order_id": "ord-atomic", "status": "ok"}
+
+    def test_live_mode_blocks_sensitive_fixture_without_override(self):
+        os.environ["GAUNTLET_MODEL_MODE"] = "live"
+        os.environ.pop("GAUNTLET_ALLOW_SENSITIVE_FIXTURE", None)
+
+        @gauntlet.tool(name="sensitive_tool")
+        def sensitive_tool(query: str) -> dict:
+            return {
+                "headers": {
+                    "Authorization": "Bearer secret-token-abcdefghijklmnopqrstuvwxyz"
+                }
+            }
+
+        fixture_hash = self._get_hash_for_tool(
+            "sensitive_tool", {"query": "needs-auth"}
+        )
+        fixture_path = os.path.join(self.tmpdir, f"{fixture_hash}.json")
+
+        with pytest.raises(RuntimeError, match="sensitive data detected in fixture"):
+            sensitive_tool(query="needs-auth")
+        assert not os.path.exists(fixture_path)
+
+    def test_live_mode_allows_sensitive_fixture_with_override(self):
+        os.environ["GAUNTLET_MODEL_MODE"] = "live"
+        os.environ["GAUNTLET_ALLOW_SENSITIVE_FIXTURE"] = "1"
+
+        @gauntlet.tool(name="sensitive_tool_override")
+        def sensitive_tool_override(query: str) -> dict:
+            return {
+                "headers": {
+                    "Authorization": "Bearer secret-token-abcdefghijklmnopqrstuvwxyz"
+                }
+            }
+
+        result = sensitive_tool_override(query="needs-auth")
+        assert result["headers"]["Authorization"].startswith("Bearer ")
+
+        fixture_hash = self._get_hash_for_tool(
+            "sensitive_tool_override", {"query": "needs-auth"}
+        )
+        fixture_path = os.path.join(self.tmpdir, f"{fixture_hash}.json")
+        assert os.path.exists(fixture_path)
 
     def test_tool_exception_passthrough_preserves_original_exception_sync(self):
         os.environ["GAUNTLET_MODEL_MODE"] = "passthrough"

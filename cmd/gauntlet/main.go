@@ -86,6 +86,7 @@ func buildRootCmd() *cobra.Command {
 		newCaptureCmd(),
 		newMigrateFixturesCmd(),
 		newLockFixturesCmd(),
+		newScanFixturesCmd(),
 		newScaffoldCmd(),
 		newScanArtifactsCmd(),
 		newSignArtifactsCmd(),
@@ -1423,6 +1424,98 @@ func newScanArtifactsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&suite, "suite", "smoke", "Suite used to resolve policy settings")
 
 	return cmd
+}
+
+type fixtureScanFileFinding struct {
+	File     string
+	Findings []fixture.SensitiveFinding
+}
+
+func newScanFixturesCmd() *cobra.Command {
+	var dir string
+
+	cmd := &cobra.Command{
+		Use:   "scan-fixtures",
+		Short: "Scan recorded fixtures for sensitive data",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			results, err := scanFixtureDirectory(dir)
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				fmt.Println("No sensitive content detected in fixtures.")
+				return nil
+			}
+
+			total := 0
+			fmt.Printf("Sensitive data found in %d fixture file(s):\n", len(results))
+			for _, result := range results {
+				fmt.Printf("  %s\n", result.File)
+				for _, finding := range result.Findings {
+					total++
+					fmt.Printf("    - field: %s\n", finding.Path)
+					fmt.Printf("      pattern: %s\n", finding.Pattern)
+					fmt.Printf("      sample: %s\n", finding.Sample)
+				}
+			}
+			emitCLIErrorCode("fixture_sensitive_scan_failed")
+			return fmt.Errorf("sensitive fixture data detected (%d finding(s)); remove secrets or rerun record with GAUNTLET_ALLOW_SENSITIVE_FIXTURE=1 for reviewed false positives", total)
+		},
+	}
+
+	cmd.Flags().StringVar(&dir, "dir", filepath.Join("evals", "fixtures"), "Directory containing fixture JSON files")
+	return cmd
+}
+
+func scanFixtureDirectory(dir string) ([]fixtureScanFileFinding, error) {
+	root := filepath.Clean(strings.TrimSpace(dir))
+	if root == "." && strings.TrimSpace(dir) == "" {
+		root = filepath.Join("evals", "fixtures")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("scan fixtures: failed to stat %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("scan fixtures: path %s is not a directory", root)
+	}
+
+	paths := []string{}
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".json") {
+			paths = append(paths, path)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("scan fixtures: walk failed for %s: %w", root, err)
+	}
+	sort.Strings(paths)
+
+	results := make([]fixtureScanFileFinding, 0)
+	for _, path := range paths {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("scan fixtures: read failed for %s: %w", path, readErr)
+		}
+		findings, scanErr := fixture.ScanSensitiveJSON(data, "")
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan fixtures: %s is not valid JSON fixture: %w", path, scanErr)
+		}
+		if len(findings) == 0 {
+			continue
+		}
+		results = append(results, fixtureScanFileFinding{
+			File:     path,
+			Findings: findings,
+		})
+	}
+	return results, nil
 }
 
 func newSignArtifactsCmd() *cobra.Command {

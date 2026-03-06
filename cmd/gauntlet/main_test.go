@@ -616,3 +616,50 @@ redaction:
 		t.Fatalf("scan-artifacts command failed: %v", err)
 	}
 }
+
+func TestScanFixturesCmd_NoSensitiveContent(t *testing.T) {
+	root := t.TempDir()
+	fixtureDir := filepath.Join(root, "evals", "fixtures", "tools")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("mkdir fixture dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureDir, "safe.json"), []byte(`{
+  "response": {"status": "ok", "order_id": "ord-123"},
+  "args": {"query": "hello"}
+}`), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cmd := newScanFixturesCmd()
+	cmd.SetArgs([]string{"--dir", filepath.Join(root, "evals", "fixtures")})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("scan-fixtures command failed unexpectedly: %v", err)
+	}
+}
+
+func TestScanFixturesCmd_FailsWhenSensitiveContentDetected(t *testing.T) {
+	root := t.TempDir()
+	fixtureDir := filepath.Join(root, "evals", "fixtures", "tools")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("mkdir fixture dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureDir, "sensitive.json"), []byte(`{
+  "response": {
+    "headers": {
+      "Authorization": "Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	cmd := newScanFixturesCmd()
+	cmd.SetArgs([]string{"--dir", filepath.Join(root, "evals", "fixtures")})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected scan-fixtures command to fail on sensitive data")
+	}
+	if !strings.Contains(err.Error(), "sensitive fixture data detected") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

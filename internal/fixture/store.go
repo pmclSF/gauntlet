@@ -186,6 +186,23 @@ func (s *Store) PutModelFixture(f *ModelFixture) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create model fixtures directory: %w", err)
 	}
+	if !allowSensitiveFixtureWrites() {
+		if findings, err := ScanSensitiveJSON(f.CanonicalRequest, "request"); err != nil {
+			return err
+		} else if len(findings) > 0 {
+			return sensitiveFixtureError("model:"+f.Model, findings[0])
+		}
+		if findings, err := ScanSensitiveJSON(f.RawRequest, "raw_request"); err != nil {
+			return err
+		} else if len(findings) > 0 {
+			return sensitiveFixtureError("model:"+f.Model, findings[0])
+		}
+		if findings, err := ScanSensitiveJSON(f.Response, "response"); err != nil {
+			return err
+		} else if len(findings) > 0 {
+			return sensitiveFixtureError("model:"+f.Model, findings[0])
+		}
+	}
 	if err := s.signModelFixture(f); err != nil {
 		return err
 	}
@@ -248,6 +265,18 @@ func (s *Store) PutToolFixture(f *ToolFixture) error {
 	dir := filepath.Join(s.BaseDir, "tools")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create tool fixtures directory: %w", err)
+	}
+	if !allowSensitiveFixtureWrites() {
+		if findings, err := ScanSensitiveJSON(f.Args, "args"); err != nil {
+			return err
+		} else if len(findings) > 0 {
+			return sensitiveFixtureError(f.ToolName, findings[0])
+		}
+		if findings, err := ScanSensitiveJSON(f.Response, "response"); err != nil {
+			return err
+		} else if len(findings) > 0 {
+			return sensitiveFixtureError(f.ToolName, findings[0])
+		}
 	}
 	if err := s.signToolFixture(f); err != nil {
 		return err

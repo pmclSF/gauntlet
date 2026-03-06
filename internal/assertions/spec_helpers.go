@@ -34,6 +34,28 @@ func specInt(spec map[string]interface{}, key string) (int, bool) {
 	}
 }
 
+func specFloat(spec map[string]interface{}, key string) (float64, bool) {
+	if spec == nil {
+		return 0, false
+	}
+	v, ok := spec[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
 func specBool(spec map[string]interface{}, key string) (bool, bool) {
 	if spec == nil {
 		return false, false
