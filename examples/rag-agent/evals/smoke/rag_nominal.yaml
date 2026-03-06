@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://gauntlet.dev/schema/scenario.json
+scenario: rag_nominal
+description: Retrieval returns supporting citations
+
+input:
+  messages:
+    - role: user
+      content: "What is your shipping SLA?"
+
+world:
+  tools:
+    retrieve_documents: nominal
+
+assertions:
+  - type: tool_sequence
+    required: [retrieve_documents]
+  - type: output_schema
+    schema:
+      type: object
+      required: [response, citations]
+      properties:
+        response:
+          type: string
+        citations:
+          type: array
+          minItems: 1
+          items:
+            type: string

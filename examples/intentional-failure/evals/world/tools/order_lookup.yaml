@@ -1,0 +1,8 @@
+tool: order_lookup
+description: Lookup order status
+
+states:
+  nominal:
+    response:
+      order_id: ord-007
+      status: confirmed

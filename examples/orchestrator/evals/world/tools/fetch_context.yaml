@@ -1,0 +1,10 @@
+tool: fetch_context
+description: Fetch contextual data for a plan
+
+states:
+  nominal:
+    response:
+      context: context-for-plan-001
+  transient_error:
+    response:
+      error: transient

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://gauntlet.dev/schema/scenario.json
+scenario: rag_empty_results
+description: Retrieval may return zero citations and still respond safely
+
+input:
+  messages:
+    - role: user
+      content: "empty topic for retrieval"
+
+world:
+  tools:
+    retrieve_documents: empty_results
+
+assertions:
+  - type: tool_sequence
+    required: [retrieve_documents]
+  - type: output_schema
+    schema:
+      type: object
+      required: [response, citations]
+      properties:
+        response:
+          type: string
+        citations:
+          type: array

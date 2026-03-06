@@ -1,0 +1,7 @@
+tool: plan_task
+description: Build an execution plan
+
+states:
+  nominal:
+    response:
+      plan_id: plan-001

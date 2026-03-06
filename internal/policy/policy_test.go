@@ -242,6 +242,44 @@ runner:
 	}
 }
 
+func TestLoad_RunnerMaxArtifactBytesParsed(t *testing.T) {
+	root := t.TempDir()
+	policyPath := filepath.Join(root, "evals", "gauntlet.yml")
+	mustMkdir(t, filepath.Dir(policyPath))
+	mustWriteFile(t, policyPath, `
+version: 1
+runner:
+  max_artifact_bytes: 2048
+`)
+
+	resolved, err := Load(policyPath, "smoke")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := resolved.MaxArtifactBytes, int64(2048); got != want {
+		t.Fatalf("MaxArtifactBytes = %d, want %d", got, want)
+	}
+}
+
+func TestLoad_RunnerMaxArtifactBytesDefault(t *testing.T) {
+	root := t.TempDir()
+	policyPath := filepath.Join(root, "evals", "gauntlet.yml")
+	mustMkdir(t, filepath.Dir(policyPath))
+	mustWriteFile(t, policyPath, `
+version: 1
+runner:
+  fail_fast: false
+`)
+
+	resolved, err := Load(policyPath, "smoke")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := resolved.MaxArtifactBytes, int64(10*1024*1024); got != want {
+		t.Fatalf("MaxArtifactBytes = %d, want %d", got, want)
+	}
+}
+
 func TestLoad_AssertionModeRejectsUnknownKey(t *testing.T) {
 	root := t.TempDir()
 	policyPath := filepath.Join(root, "evals", "gauntlet.yml")
