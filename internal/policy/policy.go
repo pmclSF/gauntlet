@@ -18,6 +18,7 @@ import (
 type Resolved struct {
 	BudgetMs                int64
 	FailFast                bool
+	MaxArtifactBytes        int64
 	RunnerMode              string
 	ModelMode               string
 	SuiteDir                string
@@ -89,7 +90,8 @@ type defaultsPolicy struct {
 }
 
 type runnerPolicy struct {
-	FailFast bool `yaml:"fail_fast"`
+	FailFast         bool  `yaml:"fail_fast"`
+	MaxArtifactBytes int64 `yaml:"max_artifact_bytes"`
 }
 
 type tutPolicy struct {
@@ -205,9 +207,15 @@ func LoadWithOptions(path string, suite string, opts LoadOptions) (*Resolved, er
 		baselineDir = filepath.Dir(baselineDir)
 	}
 
+	maxArtifactBytes := raw.Runner.MaxArtifactBytes
+	if maxArtifactBytes <= 0 {
+		maxArtifactBytes = 10 * 1024 * 1024
+	}
+
 	res := &Resolved{
 		BudgetMs:                budgetMs,
 		FailFast:                raw.Runner.FailFast,
+		MaxArtifactBytes:        maxArtifactBytes,
 		RunnerMode:              runnerMode,
 		ModelMode:               modelMode,
 		SuiteDir:                suiteDir,

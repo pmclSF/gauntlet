@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://gauntlet.dev/schema/scenario.json
+scenario: planner_premature_finalize
+description: This scenario fails on purpose to demonstrate Gauntlet failure output
+
+input:
+  messages:
+    - role: user
+      content: "what is status of ord-007"
+
+world:
+  tools:
+    order_lookup: nominal
+
+assertions:
+  - type: tool_sequence
+    required: [order_lookup, escalate_case]
+  - type: output_schema
+    schema:
+      type: object
+      required: [response]
+      properties:
+        response:
+          type: string

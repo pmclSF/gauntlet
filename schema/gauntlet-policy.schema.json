@@ -186,6 +186,11 @@
         "fail_fast": {
           "type": "boolean",
           "description": "When true, stop the suite after the first failed or error scenario."
+        },
+        "max_artifact_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum per-scenario failure artifact size in bytes before tool trace truncation is applied (default 10485760)."
         }
       }
     },
@@ -210,6 +215,7 @@
               "tool_args_invariant",
               "retry_cap",
               "forbidden_tool",
+              "forbidden_content",
               "output_derivable",
               "sensitive_leak"
             ]
@@ -225,6 +231,7 @@
               "tool_args_invariant",
               "retry_cap",
               "forbidden_tool",
+              "forbidden_content",
               "output_derivable",
               "sensitive_leak"
             ]

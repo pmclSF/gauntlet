@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/scenario"
 	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
@@ -672,6 +673,126 @@ func TestWriteArtifactBundle_PrOutputIncludesRawAndCanonicalOutput(t *testing.T)
 	}
 	if !strings.Contains(prContent, `"canonical_output":{"a":[{"x":1,"y":2}],"b":{"a":2,"z":1}}`) {
 		t.Fatalf("expected canonical_output to be key-sorted, got: %s", prContent)
+	}
+}
+
+func TestWriteArtifactBundleWithLimit_TruncatesToolTrace(t *testing.T) {
+	runDir := t.TempDir()
+	sr := ScenarioResult{
+		Name:   "artifact_truncation",
+		Status: "failed",
+		Assertions: []assertions.Result{
+			{AssertionType: "tool_sequence", Passed: false, Message: "failed"},
+		},
+	}
+
+	blob := strings.Repeat("x", 512)
+	events := make([]tut.TraceEvent, 0, 80)
+	for i := 0; i < 80; i++ {
+		payload, err := json.Marshal(map[string]string{
+			"id":   "evt",
+			"blob": blob,
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		events = append(events, tut.TraceEvent{
+			EventType: "tool_call",
+			ToolName:  "lookup",
+			Response:  payload,
+		})
+	}
+
+	if err := WriteArtifactBundleWithLimit(
+		runDir,
+		"artifact_truncation",
+		sr,
+		nil,
+		nil,
+		events,
+		nil,
+		nil,
+		2048,
+	); err != nil {
+		t.Fatalf("WriteArtifactBundleWithLimit failed: %v", err)
+	}
+
+	toolTracePath := filepath.Join(runDir, "artifact_truncation", "tool_trace.json")
+	data, err := os.ReadFile(toolTracePath)
+	if err != nil {
+		t.Fatalf("read tool_trace.json: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "[truncated — ") || !strings.Contains(content, "additional tool calls omitted]") {
+		t.Fatalf("expected truncation marker in tool_trace.json, got: %s", content)
+	}
+}
+
+func TestWriteArtifactBundle_SummaryMatchesReadmeFailureFormat(t *testing.T) {
+	runDir := t.TempDir()
+	sr := ScenarioResult{
+		Name:       "order_status_conflicting_payment",
+		Status:     "failed",
+		PrimaryTag: "planner.premature_finalize",
+		Culprit: &Culprit{
+			Class:      "db.seed.conflicting_state",
+			Confidence: "high",
+		},
+		Assertions: []assertions.Result{
+			{
+				AssertionType: "tool_sequence",
+				Passed:        false,
+				Expected:      "[order_lookup, payment_lookup]",
+				Actual:        "[order_lookup]",
+				Message:       "payment_lookup never called",
+			},
+		},
+	}
+	worldState := scenario.WorldSpec{
+		Tools: map[string]string{
+			"order_lookup": "nominal",
+		},
+		Databases: map[string]scenario.DBSpec{
+			"orders_db": {SeedSets: []string{"conflicting_state"}},
+		},
+	}
+
+	if err := WriteArtifactBundle(
+		runDir,
+		sr.Name,
+		sr,
+		nil,
+		worldState,
+		nil,
+		[]byte(`{"response":"Your order shows confirmed but the payment failed..."}`),
+		[]byte(`{"response":"Your order ord-007 is confirmed."}`),
+	); err != nil {
+		t.Fatalf("WriteArtifactBundle failed: %v", err)
+	}
+
+	summaryPath := filepath.Join(runDir, sr.Name, "summary.md")
+	data, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read summary.md: %v", err)
+	}
+	content := string(data)
+	expectedSnippets := []string{
+		"FAILED  order_status_conflicting_payment",
+		"Culprit: db.seed.conflicting_state",
+		"Confidence: high",
+		"Failing assertion:",
+		"  tool_sequence",
+		"  Expected: [order_lookup, payment_lookup]",
+		"  Actual:   [order_lookup]",
+		"World state:",
+		"Baseline output:",
+		"PR output:",
+		"Docket tag: planner.premature_finalize",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("summary missing %q\n--- summary ---\n%s", snippet, content)
+		}
 	}
 }
 

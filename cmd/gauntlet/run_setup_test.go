@@ -72,11 +72,12 @@ func TestApplyResolvedPolicy(t *testing.T) {
 	root := t.TempDir()
 	cfg := runner.Config{}
 	resolved := &policy.Resolved{
-		SuiteDir:    filepath.Join(root, "evals", "smoke"),
-		ToolsDir:    filepath.Join(root, "evals", "world", "tools"),
-		DBDir:       filepath.Join(root, "evals", "world", "databases"),
-		BaselineDir: filepath.Join(root, "evals", "baselines"),
-		FixturesDir: filepath.Join(root, "evals", "fixtures"),
+		SuiteDir:         filepath.Join(root, "evals", "smoke"),
+		ToolsDir:         filepath.Join(root, "evals", "world", "tools"),
+		DBDir:            filepath.Join(root, "evals", "world", "databases"),
+		BaselineDir:      filepath.Join(root, "evals", "baselines"),
+		FixturesDir:      filepath.Join(root, "evals", "fixtures"),
+		MaxArtifactBytes: 4096,
 		AssertionMode: policy.AssertionMode{
 			HardGates:   []string{"output_schema"},
 			SoftSignals: []string{"sensitive_leak"},
@@ -133,6 +134,9 @@ func TestApplyResolvedPolicy(t *testing.T) {
 	}
 	if !cfg.SoftSignals["sensitive_leak"] {
 		t.Fatalf("expected sensitive_leak soft signal from policy")
+	}
+	if cfg.MaxArtifactBytes != 4096 {
+		t.Fatalf("MaxArtifactBytes = %d", cfg.MaxArtifactBytes)
 	}
 }
 

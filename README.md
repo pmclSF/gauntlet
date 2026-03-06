@@ -175,6 +175,14 @@ Choose the level that fits your setup:
 Minimal still provides real value. Even without structured traces, blocking network
 egress and enforcing a time budget catches a class of regressions most CI setups miss.
 
+## Examples
+
+- [Support agent](examples/support-agent/README.md) - customer support workflows with smoke/nightly suites
+- [RAG agent](examples/rag-agent/README.md) - retrieval world states with citation assertions
+- [Multi-tool orchestrator](examples/orchestrator/README.md) - chained tools with retry caps
+- [Code agent](examples/code-agent/README.md) - sandbox execution with forbidden-content checks
+- [Intentional failure](examples/intentional-failure/README.md) - scenario that fails on purpose to inspect artifacts
+
 ## SDK capability negotiation
 
 Gauntlet SDKs emit a versioned `sdk_capabilities` handshake (`protocol_version: 1`)
@@ -222,6 +230,9 @@ assertions:
   - type: tool_args_invariant
     tool: order_lookup
     invariant: "args.order_id == input.order_id"
+  - type: forbidden_content
+    pattern: "(?i)api[_-]?key|secret"
+    fields: [output]
 ```
 
 ---

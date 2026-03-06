@@ -49,6 +49,9 @@ jobs:
       - name: Install Python SDK (dev)
         run: pip install -e "sdk/python[dev]"
 
+      - name: Install Python adapter integration dependencies
+        run: pip install -r sdk/python/tests/requirements-integration.txt
+
       - name: Python SDK tests
         run: pytest -q sdk/python/tests
 
