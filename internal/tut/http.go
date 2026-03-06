@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/pmclSF/gauntlet/internal/scenario"
@@ -19,6 +20,23 @@ import (
 type HTTPAdapter struct{}
 
 func (a *HTTPAdapter) Level() IntegrationLevel { return LevelBest }
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) {
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
@@ -36,7 +54,7 @@ func (a *HTTPAdapter) Start(ctx context.Context, config Config) (Handle, error) 
 	traceFile.Close()
 	cmd.Env = append(cmd.Env, "GAUNTLET_TRACE_FILE="+tracePath)
 
-	var stderr bytes.Buffer
+	var stderr lockedBuffer
 	cmd.Stderr = &stderr
 
 	if config.BlockNetworkEgress {
@@ -108,7 +126,7 @@ type httpHandle struct {
 	cmd          *exec.Cmd
 	baseURL      string
 	path         string
-	stderr       *bytes.Buffer
+	stderr       *lockedBuffer
 	tracePath    string
 	traces       []TraceEvent
 	capabilities *SDKCapabilities

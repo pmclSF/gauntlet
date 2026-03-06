@@ -42,6 +42,7 @@ type Config struct {
 	DryRun           bool
 	BudgetMs         int64
 	ScenarioBudgetMs int64
+	FailFast         bool
 	ScenarioFilter   string
 	HardGates        map[string]bool
 	SoftSignals      map[string]bool
@@ -59,6 +60,7 @@ type scenarioExecution struct {
 	Input     scenario.Input
 	WorldSpec scenario.WorldSpec
 	ToolTrace []tut.TraceEvent
+	Baseline  interface{}
 	PROutput  *tut.AgentOutput
 }
 
@@ -130,6 +132,9 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble world: %w", err)
 	}
+	if err := validateWorldToolRefs(scenarios, worldState); err != nil {
+		return nil, err
+	}
 
 	// Budget
 	budgetMs := r.Config.BudgetMs
@@ -186,6 +191,9 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 		case "error":
 			result.Summary.Error++
 		}
+		if r.Config.FailFast && (sr.Status == "failed" || sr.Status == "error") {
+			break
+		}
 	}
 
 	result.Summary.Total = len(result.Scenarios)
@@ -214,7 +222,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	for _, exec := range executions {
 		sr := exec.Result
 		if sr.Status == "failed" || sr.Status == "error" {
-			_ = output.WriteArtifactBundle(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, nil, exec.PROutput)
+			_ = output.WriteArtifactBundle(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput)
 		}
 	}
 
@@ -359,6 +367,9 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 		}
 		if bl.Output != nil {
 			assertCtx.Baseline.OutputSchema = bl.Output.Schema
+			if len(bl.Output.ExpectedOutput) > 0 {
+				exec.Baseline = json.RawMessage(bl.Output.ExpectedOutput)
+			}
 		}
 	}
 
@@ -378,23 +389,45 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 		results = append(results, capabilityDiagnostics...)
 		results = append(results, envDiagnostics...)
 	}
+	if handle != nil && agentOutput.ExitCode != 0 {
+		results = append(results, assertions.Result{
+			AssertionType: "tut_exit_nonzero",
+			Passed:        false,
+			Message:       fmt.Sprintf("agent process exited with code %d", agentOutput.ExitCode),
+			DocketHint:    "tut.exit_nonzero",
+		})
+	}
 	results = enforceAssertionMode(results, r.Config.HardGates, r.Config.SoftSignals)
 
 	sr.Assertions = results
 	sr.DocketTags, sr.PrimaryTag = docket.Classify(results)
+	if firstClass := detectFirstClassDocketTag(results, toolTrace); firstClass != "" {
+		sr.DocketTags = []string{firstClass}
+		sr.PrimaryTag = firstClass
+	}
 	sr.DurationMs = time.Since(start).Milliseconds()
 
 	// Determine status
 	sr.Status = "passed"
+	hasHardFailure := false
+	hasHardFailureOtherThanTUTExit := false
 	for _, a := range results {
 		if !a.Passed && !a.Soft {
-			sr.Status = "failed"
-			break
+			hasHardFailure = true
+			if a.AssertionType != "tut_exit_nonzero" {
+				hasHardFailureOtherThanTUTExit = true
+			}
 		}
+	}
+	if hasHardFailure {
+		sr.Status = "failed"
+	}
+	if handle != nil && agentOutput.ExitCode != 0 && !hasHardFailureOtherThanTUTExit {
+		sr.Status = "error"
 	}
 
 	// Classify culprit for failures
-	if sr.Status == "failed" {
+	if sr.Status == "failed" && !docket.IsFirstClassTag(sr.PrimaryTag) {
 		sr.Culprit = output.ClassifyCulprit(results, s.World.Tools)
 	}
 
@@ -465,6 +498,46 @@ func enforceAssertionMode(results []assertions.Result, hardGates, softSignals ma
 	return results
 }
 
+func detectFirstClassDocketTag(results []assertions.Result, toolTrace []tut.TraceEvent) string {
+	for _, result := range results {
+		switch result.AssertionType {
+		case "tut_exit_nonzero":
+			return docket.TagTUTExitNonzero
+		}
+		msg := strings.ToLower(strings.TrimSpace(result.Message))
+		if msg == "" {
+			continue
+		}
+		if strings.Contains(msg, "fixture miss") {
+			return docket.TagFixtureMiss
+		}
+		if strings.Contains(msg, "fixture trust failure") ||
+			strings.Contains(msg, "replay lockfile") ||
+			(strings.Contains(msg, "fixture") && strings.Contains(msg, "signature")) {
+			return docket.TagFixtureIntegrity
+		}
+	}
+
+	for _, event := range toolTrace {
+		if event.EventType != "tool_error" {
+			continue
+		}
+		msg := strings.ToLower(strings.TrimSpace(event.Error))
+		if msg == "" {
+			continue
+		}
+		if strings.Contains(msg, "fixture miss") {
+			return docket.TagFixtureMiss
+		}
+		if strings.Contains(msg, "fixture trust failure") ||
+			strings.Contains(msg, "replay lockfile") ||
+			(strings.Contains(msg, "fixture") && strings.Contains(msg, "signature")) {
+			return docket.TagFixtureIntegrity
+		}
+	}
+	return ""
+}
+
 func buildToolState(ws *world.State, toolStates map[string]string) map[string]assertions.ToolState {
 	result := make(map[string]assertions.ToolState)
 	for toolName, state := range toolStates {
@@ -489,6 +562,57 @@ func getToolSequence(bl *baseline.Contract) []string {
 		return bl.ToolSequence.Required
 	}
 	return nil
+}
+
+func validateWorldToolRefs(scenarios []*scenario.Scenario, ws *world.State) error {
+	availableTools := sortedToolNames(ws.Tools)
+	var violations []string
+	for _, s := range scenarios {
+		for toolName, stateName := range s.World.Tools {
+			toolDef, ok := ws.Tools[toolName]
+			if !ok {
+				violations = append(violations, fmt.Sprintf(
+					"scenario %q: tool %q not found in world definitions\n  available tools: %s",
+					s.Name,
+					toolName,
+					strings.Join(availableTools, ", "),
+				))
+				continue
+			}
+			if _, ok := toolDef.States[stateName]; !ok {
+				availableStates := sortedToolStates(toolDef.States)
+				violations = append(violations, fmt.Sprintf(
+					"scenario %q: tool %q has no state %q\n  available states: %s",
+					s.Name,
+					toolName,
+					stateName,
+					strings.Join(availableStates, ", "),
+				))
+			}
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	return fmt.Errorf("invalid world tool references:\n  - %s", strings.Join(violations, "\n  - "))
+}
+
+func sortedToolNames(tools map[string]*world.ToolDef) []string {
+	names := make([]string, 0, len(tools))
+	for name := range tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedToolStates(states map[string]*world.ToolStateDef) []string {
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Runner) adapterCapabilityDiagnostics(handle tut.Handle, traces []tut.TraceEvent) []assertions.Result {
@@ -826,10 +950,4 @@ func getCommit() string {
 
 func modeRequiresBlockedEgress(mode string) bool {
 	return mode == "pr_ci" || mode == "fork_pr"
-}
-
-// mustMarshal is a helper for JSON marshaling that panics on error.
-func mustMarshal(v interface{}) json.RawMessage {
-	data, _ := json.Marshal(v)
-	return data
 }

@@ -99,6 +99,7 @@ type TraceEvent struct {
 	ToolName        string                `json:"tool_name,omitempty"`
 	Args            json.RawMessage       `json:"args,omitempty"`
 	Response        json.RawMessage       `json:"response,omitempty"`
+	Error           string                `json:"error,omitempty"`
 	ModelCall       *ModelCallEvent       `json:"model_call,omitempty"`
 	SDKCapabilities *SDKCapabilities      `json:"sdk_capabilities,omitempty"`
 	DeterminismEnv  *DeterminismEnvReport `json:"determinism_env,omitempty"`

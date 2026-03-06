@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -41,7 +42,13 @@ func applySeedSet(db *sql.DB, seed *SeedSetDef) error {
 		return nil
 	}
 
-	for tableName, tableDef := range seed.Tables {
+	tableNames := make([]string, 0, len(seed.Tables))
+	for tableName := range seed.Tables {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+	for _, tableName := range tableNames {
+		tableDef := seed.Tables[tableName]
 		if err := seedTableDef(db, tableName, tableDef); err != nil {
 			return fmt.Errorf("table %s: %w", tableName, err)
 		}
@@ -59,15 +66,26 @@ func seedTableDef(db *sql.DB, table string, td *TableDef) error {
 	var cols []string
 	var colDefs []string
 	if len(td.Columns) > 0 {
-		for name, colType := range td.Columns {
+		columnNames := make([]string, 0, len(td.Columns))
+		for name := range td.Columns {
+			columnNames = append(columnNames, name)
+		}
+		sort.Strings(columnNames)
+		for _, name := range columnNames {
+			colType := td.Columns[name]
 			cols = append(cols, name)
 			colDefs = append(colDefs, name+" "+colType)
 		}
 	} else {
 		// Infer columns from first row
-		for k := range td.Rows[0] {
-			cols = append(cols, k)
-			colDefs = append(colDefs, k+" TEXT")
+		columnNames := make([]string, 0, len(td.Rows[0]))
+		for name := range td.Rows[0] {
+			columnNames = append(columnNames, name)
+		}
+		sort.Strings(columnNames)
+		for _, name := range columnNames {
+			cols = append(cols, name)
+			colDefs = append(colDefs, name+" TEXT")
 		}
 	}
 

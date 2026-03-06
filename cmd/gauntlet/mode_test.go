@@ -77,3 +77,21 @@ func TestResolveModelMode_PreferenceOrder(t *testing.T) {
 		t.Fatalf("resolveModelMode policy = %q, want recorded", got)
 	}
 }
+
+func TestResolveRunnerMode_AliasModes(t *testing.T) {
+	got, err := resolveRunnerMode("hermetic", "", nil)
+	if err != nil {
+		t.Fatalf("resolveRunnerMode hermetic: %v", err)
+	}
+	if got != "pr_ci" {
+		t.Fatalf("resolveRunnerMode hermetic = %q, want pr_ci", got)
+	}
+
+	got, err = resolveRunnerMode("replay", "", nil)
+	if err != nil {
+		t.Fatalf("resolveRunnerMode replay: %v", err)
+	}
+	if got != "fork_pr" {
+		t.Fatalf("resolveRunnerMode replay = %q, want fork_pr", got)
+	}
+}

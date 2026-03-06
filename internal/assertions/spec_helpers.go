@@ -34,6 +34,22 @@ func specInt(spec map[string]interface{}, key string) (int, bool) {
 	}
 }
 
+func specBool(spec map[string]interface{}, key string) (bool, bool) {
+	if spec == nil {
+		return false, false
+	}
+	v, ok := spec[key]
+	if !ok {
+		return false, false
+	}
+	switch b := v.(type) {
+	case bool:
+		return b, true
+	default:
+		return false, false
+	}
+}
+
 func specStringSlice(spec map[string]interface{}, key string) []string {
 	if spec == nil {
 		return nil

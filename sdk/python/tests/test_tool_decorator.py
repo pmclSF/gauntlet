@@ -9,6 +9,8 @@ import hashlib
 import os
 import tempfile
 import concurrent.futures
+import asyncio
+import inspect
 import pytest
 
 import gauntlet
@@ -324,6 +326,132 @@ class TestToolDecorator:
         assert call_count == 0
         assert result_a == {"id": "A", "status": "active"}
         assert result_b == {"id": "B", "status": "inactive"}
+
+    def test_decorator_supports_descriptors_and_async_in_recorded_and_live_modes(self):
+        static_calls = 0
+        class_calls = 0
+        method_calls = 0
+        async_calls = 0
+        function_calls = 0
+
+        class ToolBox:
+            @gauntlet.tool(name="static_lookup")
+            @staticmethod
+            def static_lookup(order_id: str) -> dict:
+                """Static lookup doc."""
+                nonlocal static_calls
+                static_calls += 1
+                return {"source": "live", "kind": "static", "order_id": order_id}
+
+            @gauntlet.tool(name="class_lookup")
+            @classmethod
+            def class_lookup(cls, order_id: str) -> dict:
+                """Class lookup doc."""
+                nonlocal class_calls
+                class_calls += 1
+                return {"source": "live", "kind": "class", "order_id": order_id}
+
+            @gauntlet.tool(name="instance_lookup")
+            def instance_lookup(self, order_id: str) -> dict:
+                """Instance lookup doc."""
+                nonlocal method_calls
+                method_calls += 1
+                return {"source": "live", "kind": "instance", "order_id": order_id}
+
+        @gauntlet.tool(name="async_lookup")
+        async def async_lookup(order_id: str) -> dict:
+            """Async lookup doc."""
+            nonlocal async_calls
+            async_calls += 1
+            return {"source": "live", "kind": "async", "order_id": order_id}
+
+        @gauntlet.tool(name="function_lookup")
+        def function_lookup(order_id: str) -> dict:
+            """Function lookup doc."""
+            nonlocal function_calls
+            function_calls += 1
+            return {"source": "live", "kind": "function", "order_id": order_id}
+
+        box = ToolBox()
+
+        fixture_inputs = [
+            ("static_lookup", {"order_id": "ord-static"}, {"source": "fixture", "kind": "static"}),
+            ("class_lookup", {"order_id": "ord-class"}, {"source": "fixture", "kind": "class"}),
+            ("instance_lookup", {"order_id": "ord-instance"}, {"source": "fixture", "kind": "instance"}),
+            ("async_lookup", {"order_id": "ord-async"}, {"source": "fixture", "kind": "async"}),
+            ("function_lookup", {"order_id": "ord-function"}, {"source": "fixture", "kind": "function"}),
+        ]
+        for tool_name, args, response in fixture_inputs:
+            fixture_hash = self._get_hash_for_tool(tool_name, args)
+            self._write_fixture(fixture_hash, response)
+
+        assert ToolBox.static_lookup(order_id="ord-static") == {"source": "fixture", "kind": "static"}
+        assert ToolBox.class_lookup(order_id="ord-class") == {"source": "fixture", "kind": "class"}
+        assert box.instance_lookup(order_id="ord-instance") == {"source": "fixture", "kind": "instance"}
+        assert asyncio.run(async_lookup(order_id="ord-async")) == {"source": "fixture", "kind": "async"}
+        assert function_lookup(order_id="ord-function") == {"source": "fixture", "kind": "function"}
+
+        assert static_calls == 0
+        assert class_calls == 0
+        assert method_calls == 0
+        assert async_calls == 0
+        assert function_calls == 0
+
+        # Metadata + signatures are preserved.
+        assert ToolBox.static_lookup.__name__ == "static_lookup"
+        assert ToolBox.static_lookup.__doc__ == "Static lookup doc."
+        assert str(inspect.signature(ToolBox.static_lookup)) == "(order_id: str) -> dict"
+        assert ToolBox.class_lookup.__name__ == "class_lookup"
+        assert ToolBox.class_lookup.__doc__ == "Class lookup doc."
+        assert str(inspect.signature(ToolBox.class_lookup)) == "(order_id: str) -> dict"
+        assert box.instance_lookup.__name__ == "instance_lookup"
+        assert box.instance_lookup.__doc__ == "Instance lookup doc."
+        assert str(inspect.signature(ToolBox.instance_lookup)) == "(self, order_id: str) -> dict"
+        assert async_lookup.__name__ == "async_lookup"
+        assert async_lookup.__doc__ == "Async lookup doc."
+        assert str(inspect.signature(async_lookup)) == "(order_id: str) -> dict"
+        assert function_lookup.__name__ == "function_lookup"
+        assert function_lookup.__doc__ == "Function lookup doc."
+        assert str(inspect.signature(function_lookup)) == "(order_id: str) -> dict"
+
+        # Live mode executes wrapped callables normally.
+        os.environ["GAUNTLET_MODEL_MODE"] = "live"
+        assert ToolBox.static_lookup(order_id="ord-live-static")["source"] == "live"
+        assert ToolBox.class_lookup(order_id="ord-live-class")["source"] == "live"
+        assert box.instance_lookup(order_id="ord-live-instance")["source"] == "live"
+        assert asyncio.run(async_lookup(order_id="ord-live-async"))["source"] == "live"
+        assert function_lookup(order_id="ord-live-function")["source"] == "live"
+
+        assert static_calls == 1
+        assert class_calls == 1
+        assert method_calls == 1
+        assert async_calls == 1
+        assert function_calls == 1
+
+    def test_live_mode_fixture_write_is_atomic_under_concurrency(self):
+        os.environ["GAUNTLET_MODEL_MODE"] = "live"
+
+        @gauntlet.tool(name="atomic_write_tool")
+        def atomic_write_tool(order_id: str) -> dict:
+            return {"order_id": order_id, "status": "ok"}
+
+        def _call(_):
+            return atomic_write_tool(order_id="ord-atomic")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(_call, range(10)))
+        assert all(result == {"order_id": "ord-atomic", "status": "ok"} for result in results)
+
+        fixture_hash = self._get_hash_for_tool(
+            "atomic_write_tool", {"order_id": "ord-atomic"}
+        )
+        fixture_path = os.path.join(self.tmpdir, f"{fixture_hash}.json")
+        assert os.path.exists(fixture_path)
+
+        with open(fixture_path) as f:
+            saved = json.load(f)
+        assert saved["canonical_hash"] == fixture_hash
+        assert saved["response"] == {"order_id": "ord-atomic", "status": "ok"}
 
 
 class TestToolDecoratorCanonicalDenylist:

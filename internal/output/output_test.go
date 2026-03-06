@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pmclSF/gauntlet/internal/assertions"
+	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
 // ---------------------------------------------------------------------------
@@ -629,5 +630,68 @@ func TestWriteArtifactBundle_RedactsSensitiveData(t *testing.T) {
 	summaryContent := string(summaryData)
 	if strings.Contains(summaryContent, "4111-1111-1111-1111") {
 		t.Fatalf("sensitive data was not redacted in artifact summary.md: %s", summaryContent)
+	}
+}
+
+func TestWriteArtifactBundle_PrOutputIncludesRawAndCanonicalOutput(t *testing.T) {
+	runDir := t.TempDir()
+	sr := ScenarioResult{
+		Name:   "artifact_output_snapshot",
+		Status: "failed",
+		Assertions: []assertions.Result{
+			{AssertionType: "output_schema", Passed: false, Message: "failed"},
+		},
+	}
+	prOutput := &tut.AgentOutput{
+		Raw: []byte(`{"b":{"z":1,"a":2},"a":[{"y":2,"x":1}]}`),
+	}
+
+	if err := WriteArtifactBundle(runDir, "artifact_output_snapshot", sr, nil, nil, nil, nil, prOutput); err != nil {
+		t.Fatalf("WriteArtifactBundle failed: %v", err)
+	}
+
+	prData, err := os.ReadFile(filepath.Join(runDir, "artifact_output_snapshot", "pr_output.json"))
+	if err != nil {
+		t.Fatalf("failed to read pr_output.json: %v", err)
+	}
+	var snapshot map[string]interface{}
+	if err := json.Unmarshal(prData, &snapshot); err != nil {
+		t.Fatalf("failed to parse pr_output.json: %v", err)
+	}
+	_, ok := snapshot["raw_output"]
+	if !ok {
+		t.Fatalf("expected raw_output field in pr_output.json: %s", string(prData))
+	}
+	_, ok = snapshot["canonical_output"]
+	if !ok {
+		t.Fatalf("expected canonical_output field in pr_output.json: %s", string(prData))
+	}
+	prContent := string(prData)
+	if !strings.Contains(prContent, `"raw_output":"{\"b\":{\"z\":1,\"a\":2},\"a\":[{\"y\":2,\"x\":1}]}"`) {
+		t.Fatalf("expected raw_output to preserve original ordering, got: %s", prContent)
+	}
+	if !strings.Contains(prContent, `"canonical_output":{"a":[{"x":1,"y":2}],"b":{"a":2,"z":1}}`) {
+		t.Fatalf("expected canonical_output to be key-sorted, got: %s", prContent)
+	}
+}
+
+func TestAtomicWrite_ReplacesFileContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.json")
+	if err := os.WriteFile(path, []byte(`{"old":true}`), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	newContent := []byte(`{"new":true}`)
+	if err := atomicWrite(path, newContent, 0o644); err != nil {
+		t.Fatalf("atomicWrite failed: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(got) != string(newContent) {
+		t.Fatalf("final content = %q, want %q", string(got), string(newContent))
 	}
 }

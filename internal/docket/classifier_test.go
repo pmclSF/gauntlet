@@ -83,3 +83,15 @@ func TestPrecedenceOrder(t *testing.T) {
 		t.Error("input.malformed should have higher precedence (lower value) than planner.premature_finalize")
 	}
 }
+
+func TestFirstClassTagPrecedence(t *testing.T) {
+	if Precedence(TagFixtureMiss) >= Precedence(TagInputMalformed) {
+		t.Error("fixture.miss should have higher precedence than input.malformed")
+	}
+	if !IsFirstClassTag(TagFixtureMiss) || !IsFirstClassTag(TagFixtureIntegrity) || !IsFirstClassTag(TagTUTExitNonzero) {
+		t.Error("expected all first-class tags to be recognized")
+	}
+	if IsFirstClassTag(TagPlannerPrematureEnd) {
+		t.Error("planner tag should not be treated as first-class")
+	}
+}

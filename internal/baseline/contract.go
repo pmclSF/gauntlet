@@ -1,9 +1,11 @@
 package baseline
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
+	"github.com/pmclSF/gauntlet/internal/determinism"
 	"github.com/pmclSF/gauntlet/internal/tut"
 )
 
@@ -43,6 +45,35 @@ func Compare(baseline *Contract, toolTrace []tut.TraceEvent, output tut.AgentOut
 
 	// Output checks
 	if baseline.Output != nil && output.Parsed != nil {
+		if len(baseline.Output.ExpectedOutput) > 0 {
+			expectedCanonical, err := determinism.CanonicalizeJSON(baseline.Output.ExpectedOutput)
+			if err != nil {
+				mismatches = append(mismatches, Mismatch{
+					Field:    "output.expected_output",
+					Expected: "valid JSON expected_output baseline",
+					Actual:   "invalid expected_output baseline",
+					Message:  fmt.Sprintf("failed to canonicalize baseline expected_output: %v", err),
+				})
+			} else {
+				actualCanonical, err := determinism.CanonicalizeOutput(output.Parsed)
+				if err != nil {
+					mismatches = append(mismatches, Mismatch{
+						Field:    "output.expected_output",
+						Expected: string(expectedCanonical),
+						Actual:   "failed to canonicalize actual output",
+						Message:  fmt.Sprintf("failed to canonicalize actual output: %v", err),
+					})
+				} else if !bytes.Equal(expectedCanonical, actualCanonical) {
+					mismatches = append(mismatches, Mismatch{
+						Field:    "output.expected_output",
+						Expected: string(expectedCanonical),
+						Actual:   string(actualCanonical),
+						Message:  "output differs from canonical baseline output",
+					})
+				}
+			}
+		}
+
 		// Required fields
 		for _, field := range baseline.Output.RequiredFields {
 			if _, ok := output.Parsed[field]; !ok {

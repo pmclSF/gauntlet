@@ -269,14 +269,14 @@ func TestLoadToolDef_FromFile(t *testing.T) {
 tool: order_lookup
 states:
   nominal:
-    status_code: 200
+    response_code: 200
     behavior: returns order info
     agent_expectation: should relay status
     response:
       order_id: "ord-001"
       status: "shipped"
   timeout:
-    status_code: 504
+    response_code: 504
     behavior: gateway timeout
     delay_ms: 30000
     error: "connection timed out"
@@ -320,6 +320,31 @@ states:
 	}
 	if timeout.Error != "connection timed out" {
 		t.Errorf("timeout Error = %q", timeout.Error)
+	}
+}
+
+func TestLoadToolDef_LegacyStatusCodeAliasStillSupported(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+tool: order_lookup
+states:
+  nominal:
+    status_code: 201
+`
+	path := filepath.Join(dir, "order_lookup.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+	td, err := LoadToolDef(path)
+	if err != nil {
+		t.Fatalf("LoadToolDef failed: %v", err)
+	}
+	nominal := td.States["nominal"]
+	if nominal == nil {
+		t.Fatal("missing 'nominal' state")
+	}
+	if nominal.StatusCode != 201 {
+		t.Fatalf("StatusCode = %d, want 201", nominal.StatusCode)
 	}
 }
 

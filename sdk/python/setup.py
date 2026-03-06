@@ -13,6 +13,11 @@ setup(
         "openai": ["openai>=1.0"],
         "anthropic": ["anthropic>=0.18"],
         "langchain": ["langchain-core>=0.1"],
+        "dev": [
+            "pytest>=7.0",
+            "mypy>=1.8",
+            "pyright>=1.1.390",
+        ],
     },
     description="Gauntlet SDK — deterministic scenario testing for agentic systems",
     long_description=long_description,

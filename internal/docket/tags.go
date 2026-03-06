@@ -6,6 +6,9 @@ package docket
 // Tags in precedence order (highest to lowest).
 // When multiple tags match, the highest-precedence one is primary.
 const (
+	TagFixtureMiss         = "fixture.miss"
+	TagFixtureIntegrity    = "fixture.integrity"
+	TagTUTExitNonzero      = "tut.exit_nonzero"
 	TagInputMalformed       = "input.malformed"
 	TagInputSchemaDrift     = "input.schema_drift"
 	TagToolArgsInvalid      = "tool.args_invalid"
@@ -26,6 +29,9 @@ const (
 // TagPrecedence defines the priority order for docket tags.
 // Lower index = higher precedence.
 var TagPrecedence = []string{
+	TagFixtureMiss,
+	TagFixtureIntegrity,
+	TagTUTExitNonzero,
 	TagInputMalformed,
 	TagInputSchemaDrift,
 	TagToolArgsInvalid,
@@ -41,6 +47,17 @@ var TagPrecedence = []string{
 	TagOutputSensitiveLeak,
 	TagOutputUngrounded,
 	TagUnknown,
+}
+
+// IsFirstClassTag reports whether a tag is assigned directly by the runner and
+// should bypass heuristic culprit analysis.
+func IsFirstClassTag(tag string) bool {
+	switch tag {
+	case TagFixtureMiss, TagFixtureIntegrity, TagTUTExitNonzero:
+		return true
+	default:
+		return false
+	}
 }
 
 // precedenceIndex maps tag to its precedence index.

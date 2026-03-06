@@ -65,7 +65,7 @@ func ScanPythonImportWarnings(dirs []string) []Warning {
 	seen := map[string]bool{}
 
 	for _, dir := range dirs {
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return nil
 			}
@@ -98,7 +98,9 @@ func ScanPythonImportWarnings(dirs []string) []Warning {
 				}
 			}
 			return nil
-		})
+		}); err != nil {
+			continue
+		}
 	}
 	return warnings
 }

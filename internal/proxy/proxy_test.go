@@ -365,12 +365,12 @@ func TestHandleDecryptedConnection_LargeRequest(t *testing.T) {
 
 	// Write in a goroutine — net.Pipe is synchronous.
 	go func() {
-		client.Write([]byte(reqStr))
+		_, _ = client.Write([]byte(reqStr))
 	}()
 
 	// Read the response — we expect a 502 (fixture miss) rather than a truncation error.
 	// Read in a loop to drain the full response before closing.
-	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var resp []byte
 	buf := make([]byte, 4096)
 	for {
@@ -409,11 +409,11 @@ func TestHandleDecryptedConnection_ProperStatusText(t *testing.T) {
 	}()
 
 	go func() {
-		client.Write([]byte(reqStr))
+		_, _ = client.Write([]byte(reqStr))
 	}()
 
 	// Read the full response then close.
-	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var resp []byte
 	buf := make([]byte, 4096)
 	for {
@@ -637,7 +637,7 @@ func TestHandleDecryptedConnection_HTTP2PrefaceReturns505(t *testing.T) {
 		_, _ = client.Write([]byte(http2ClientPreface))
 	}()
 
-	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var resp []byte
 	buf := make([]byte, 2048)
 	for {
@@ -682,7 +682,9 @@ func TestHandleDecryptedConnection_MaxRequestsPerConnection(t *testing.T) {
 		_, _ = client.Write([]byte(req1 + req2))
 	}()
 
-	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := client.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
 	var resp []byte
 	buf := make([]byte, 4096)
 	for {

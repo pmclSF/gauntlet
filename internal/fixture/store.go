@@ -194,7 +194,10 @@ func (s *Store) PutModelFixture(f *ModelFixture) error {
 		return fmt.Errorf("failed to marshal model fixture: %w", err)
 	}
 	path := filepath.Join(dir, f.CanonicalHash+".json")
-	return os.WriteFile(path, data, 0o644)
+	if err := atomicWriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write model fixture %s: %w", path, err)
+	}
+	return nil
 }
 
 // GetToolFixture retrieves a tool fixture by tool name and canonical hash.
@@ -254,7 +257,10 @@ func (s *Store) PutToolFixture(f *ToolFixture) error {
 		return fmt.Errorf("failed to marshal tool fixture: %w", err)
 	}
 	path := filepath.Join(dir, f.CanonicalHash+".json")
-	return os.WriteFile(path, data, 0o644)
+	if err := atomicWriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write tool fixture %s: %w", path, err)
+	}
+	return nil
 }
 
 // ListModelFixtures lists all model fixture hashes.
@@ -485,5 +491,55 @@ func (s *Store) validateFixtureContext(path, suite, scenarioSetSHA256 string) er
 		strings.TrimSpace(scenarioSetSHA256) != s.ExpectedScenarioSetSHA256 {
 		return fmt.Errorf("fixture %s scenario_set_sha256 mismatch: fixture=%s expected=%s", path, scenarioSetSHA256, s.ExpectedScenarioSetSHA256)
 	}
+	return nil
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	unlock, err := lockPath(path)
+	if err != nil {
+		return fmt.Errorf("failed to lock fixture path %s: %w", path, err)
+	}
+	defer unlock()
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("failed to write temp file for %s: %w", path, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file for %s: %w", path, err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("failed to chmod temp file for %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("failed to atomically replace %s: %w", path, err)
+	}
+	cleanup = false
+
+	dirHandle, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("failed to open fixture directory %s for sync: %w", dir, err)
+	}
+	defer dirHandle.Close()
+	if err := dirHandle.Sync(); err != nil {
+		return fmt.Errorf("failed to sync fixture directory %s: %w", dir, err)
+	}
+
 	return nil
 }

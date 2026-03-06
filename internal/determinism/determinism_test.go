@@ -299,6 +299,60 @@ func TestCanonicalizeOutput_Idempotent(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeOutput_PreservesNullValues(t *testing.T) {
+	input := map[string]interface{}{
+		"present": nil,
+		"nested": map[string]interface{}{
+			"child": nil,
+		},
+	}
+	data, err := CanonicalizeOutput(input)
+	if err != nil {
+		t.Fatalf("CanonicalizeOutput failed: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"present":null`) {
+		t.Fatalf("expected top-level null field, got %s", got)
+	}
+	if !strings.Contains(got, `"child":null`) {
+		t.Fatalf("expected nested null field, got %s", got)
+	}
+}
+
+func TestCanonicalizeOutput_NormalizesUnicodeToNFC(t *testing.T) {
+	input := map[string]interface{}{
+		// "cafe\u0301" (e + combining acute accent)
+		"label": "cafe\u0301",
+	}
+	data, err := CanonicalizeOutput(input)
+	if err != nil {
+		t.Fatalf("CanonicalizeOutput failed: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "café") {
+		t.Fatalf("expected NFC-normalized unicode in output, got %s", got)
+	}
+	if strings.Contains(got, "cafe\u0301") {
+		t.Fatalf("expected combining form to be normalized, got %s", got)
+	}
+}
+
+func TestCanonicalizeJSON_DifferentKeyOrderingMatches(t *testing.T) {
+	left := []byte(`{"b":{"z":1,"a":2},"a":[{"y":2,"x":1}]}`)
+	right := []byte(`{"a":[{"x":1,"y":2}],"b":{"a":2,"z":1}}`)
+	leftCanonical, err := CanonicalizeJSON(left)
+	if err != nil {
+		t.Fatalf("CanonicalizeJSON(left) failed: %v", err)
+	}
+	rightCanonical, err := CanonicalizeJSON(right)
+	if err != nil {
+		t.Fatalf("CanonicalizeJSON(right) failed: %v", err)
+	}
+	if string(leftCanonical) != string(rightCanonical) {
+		t.Fatalf("canonical JSON mismatch:\nleft:  %s\nright: %s", leftCanonical, rightCanonical)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Violation detection: clock skew
 // ---------------------------------------------------------------------------

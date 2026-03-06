@@ -79,10 +79,9 @@ Mitigations:
 ## Supply chain
 
 Binary distribution:
-- Signed with cosign
-- SLSA Level 2 provenance
-- Checksums published alongside every release
-- Install script verifies signature before execution
+- Checksums published in `https://gauntlet.dev/checksums.txt`
+- `install.sh` verifies SHA-256 checksums for prebuilt binary installs before extraction
+- `go install ...@latest` path relies on the Go module checksum database (sumdb)
 
 GitHub Actions:
 - Workflow pinned to SHA, not tag
