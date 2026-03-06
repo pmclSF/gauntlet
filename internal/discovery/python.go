@@ -36,6 +36,7 @@ var (
 )
 
 // frameworkToolModules maps Python module paths to tool decorator names and their framework.
+// NOTE: Keep in sync with internal/scaffold/ast_extract.py (framework_imports dict).
 var frameworkToolModules = map[string][]frameworkDecoratorInfo{
 	"agents":               {{Symbol: "function_tool", Framework: "openai-agents"}},
 	"agents.tool":          {{Symbol: "function_tool", Framework: "openai-agents"}},

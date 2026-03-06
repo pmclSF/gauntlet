@@ -107,9 +107,8 @@ func LoadDBDef(path string) (*DBDef, error) {
 	return &dd, nil
 }
 
-// Assemble builds a world State from tool and DB definition directories
-// and a scenario's world spec.
-func Assemble(toolsDir, dbDir string, tools map[string]string, dbs map[string][]string) (*State, error) {
+// Assemble builds a world State from tool and DB definition directories.
+func Assemble(toolsDir, dbDir string) (*State, error) {
 	state := &State{
 		Tools:     make(map[string]*ToolDef),
 		Databases: make(map[string]*DBDef),

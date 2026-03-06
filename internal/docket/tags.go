@@ -22,7 +22,9 @@ const (
 	TagOutputInvalidJSON    = "output.invalid_json"
 	TagOutputSchemaMismatch = "output.schema_mismatch"
 	TagOutputSensitiveLeak  = "output.sensitive_leak"
+	TagOutputSemanticMatch  = "output.semantic_mismatch"
 	TagOutputUngrounded     = "output.ungrounded"
+	TagJudgeError           = "assertion.judge_error"
 	TagUnknown              = "unknown"
 )
 
@@ -45,7 +47,9 @@ var TagPrecedence = []string{
 	TagOutputInvalidJSON,
 	TagOutputSchemaMismatch,
 	TagOutputSensitiveLeak,
+	TagOutputSemanticMatch,
 	TagOutputUngrounded,
+	TagJudgeError,
 	TagUnknown,
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,7 +133,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	}
 
 	// Load world state
-	worldState, err := world.Assemble(toolsDir, dbDir, nil, nil)
+	worldState, err := world.Assemble(toolsDir, dbDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble world: %w", err)
 	}
@@ -213,7 +214,9 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 		return result, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	_ = output.PopulateHistoryMetadata(result, outputDir)
+	if err := output.PopulateHistoryMetadata(result, outputDir); err != nil {
+		log.Printf("warning: failed to populate run history metadata: %v", err)
+	}
 
 	if err := output.WriteResults(outputDir, result); err != nil {
 		return result, fmt.Errorf("failed to write results.json: %w", err)
@@ -223,12 +226,17 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	}
 
 	// Write artifact bundles for failures
+	var artifactErrors []string
 	for _, exec := range executions {
 		sr := exec.Result
 		if sr.Status == "failed" || sr.Status == "error" {
-			// TODO(stage9): Do not discard this error — artifact write failures should be surfaced.
-			_ = output.WriteArtifactBundleWithLimit(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput, r.Config.MaxArtifactBytes)
+			if err := output.WriteArtifactBundleWithLimit(outputDir, sr.Name, sr, exec.Input, exec.WorldSpec, exec.ToolTrace, exec.Baseline, exec.PROutput, r.Config.MaxArtifactBytes); err != nil {
+				artifactErrors = append(artifactErrors, fmt.Sprintf("scenario %q: %v", sr.Name, err))
+			}
 		}
+	}
+	if len(artifactErrors) > 0 {
+		return result, fmt.Errorf("failed to write artifact bundles:\n  - %s", strings.Join(artifactErrors, "\n  - "))
 	}
 
 	return result, nil
@@ -351,7 +359,10 @@ func (r *Runner) runScenario(ctx context.Context, s *scenario.Scenario, ws *worl
 	}
 
 	// Load baseline
-	bl, _ := baseline.Load(baselineDir, r.Config.Suite, s.Name)
+	bl, blErr := baseline.Load(baselineDir, r.Config.Suite, s.Name)
+	if blErr != nil {
+		log.Printf("warning: failed to load baseline for scenario %q: %v", s.Name, blErr)
+	}
 
 	// Build assertion context
 	assertCtx := assertions.Context{

@@ -186,7 +186,7 @@ func writeEvidenceManifest(path string, manifest *EvidenceManifest) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal evidence manifest: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := atomicWrite(path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write evidence manifest %s: %w", path, err)
 	}
 	return nil
@@ -220,10 +220,10 @@ func loadOrCreateEd25519Key(path string) (ed25519.PrivateKey, []byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create signing key directory: %w", err)
 	}
-	if err := os.WriteFile(path, privPEM, 0o600); err != nil {
+	if err := atomicWrite(path, privPEM, 0o600); err != nil {
 		return nil, nil, fmt.Errorf("failed to write signing key %s: %w", path, err)
 	}
-	if err := os.WriteFile(path+".pub.pem", pubPEM, 0o644); err != nil {
+	if err := atomicWrite(path+".pub.pem", pubPEM, 0o644); err != nil {
 		return nil, nil, fmt.Errorf("failed to write signing public key %s.pub.pem: %w", path, err)
 	}
 	return priv, pubPEM, nil
