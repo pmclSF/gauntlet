@@ -133,7 +133,7 @@ func (r *Runner) Run(ctx context.Context) (*output.RunResult, error) {
 	}
 
 	// Load world state
-	worldState, err := world.Assemble(toolsDir, dbDir, nil, nil)
+	worldState, err := world.Assemble(toolsDir, dbDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble world: %w", err)
 	}

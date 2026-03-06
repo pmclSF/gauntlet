@@ -154,7 +154,7 @@ func validateSuiteFiles(suiteDir, toolsDir, dbDir string) (map[string][]string, 
 		return nil, fmt.Errorf("no scenario files found in %s", suiteDir)
 	}
 
-	ws, err := world.Assemble(toolsDir, dbDir, nil, nil)
+	ws, err := world.Assemble(toolsDir, dbDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble world definitions: %w", err)
 	}
