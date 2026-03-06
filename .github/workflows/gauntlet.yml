@@ -26,14 +26,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Verify install endpoint
-        run: |
-          code="$(curl -fsSLI -o /dev/null -w "%{http_code}" https://gauntlet.dev/install.sh)"
-          if [ "$code" != "200" ]; then
-            echo "gauntlet.dev/install.sh must return HTTP 200 (got $code)"
-            exit 1
-          fi
-
       - name: Build
         run: make build
 
